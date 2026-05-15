@@ -146,18 +146,21 @@ def ask_ollama(user_input: str, lang: str = "en") -> str:
 
 def process(user_input: str, lang: str = "en") -> str:
     save_message("user", user_input)
+    
+    # Always check memory first
+    memory_context = recall(user_input)
+    
     tool_result = route(user_input)
     if tool_result is None:
         result = ask_ollama(user_input, lang)
     else:
-        # Pass tool data through Ollama for a natural human-like response
+        memory_note = f"\nRemember this about Sir's preferences:\n{memory_context}\n" if memory_context else ""
         result = ask_ollama(
-            f"Here is the data for the user's request '{user_input}':\n{tool_result}\n\nRespond to Sir naturally and conversationally based on this data. Do not dump raw data.",
+            f"{memory_note}Sir asked: '{user_input}'\nData:\n{tool_result}\n\nRespond exactly according to what Sir asked for — if they said summary give 2-3 sentences, if they said detailed give full detail. Never offer unsolicited suggestions about tea, lighting, or anything else.",
             lang
         )
     save_message("assistant", result)
     return result
-
 # ── Terminal test loop ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

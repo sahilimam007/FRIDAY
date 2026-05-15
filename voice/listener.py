@@ -22,14 +22,14 @@ RATE           = 16000
 CHUNK          = 1024
 
 # Clap settings
-CLAP_THRESHOLD = 3000
-CLAP_COOLDOWN  = 0.3
-CLAP_WINDOW    = 1.5
+CLAP_THRESHOLD = 3500
+CLAP_COOLDOWN  = 0.5
+CLAP_WINDOW    = 1.0
 
 # Silence detection settings
-SILENCE_THRESHOLD  = 200   # below this = silence
-SILENCE_SECONDS    = 1.5   # stop after 1.5s of silence
-MAX_RECORD_SECONDS = 15    # hard cap
+SILENCE_THRESHOLD  = 200
+SILENCE_SECONDS    = 1.5
+MAX_RECORD_SECONDS = 15
 
 
 # ── Transcribe any WAV file ────────────────────────────────────────────────────
@@ -127,6 +127,9 @@ def listen() -> tuple:
     - "Jarvis"     → wake up
     Then records until silence and returns (text, language).
     """
+    from voice.speaker import stop_speaking, wake_response
+    stop_speaking()  # kill any ongoing speech before listening
+
     pa     = pyaudio.PyAudio()
     stream = pa.open(format=FORMAT, channels=CHANNELS, rate=RATE,
                      input=True, frames_per_buffer=CHUNK)
@@ -134,9 +137,9 @@ def listen() -> tuple:
     print("\nReady — double clap or say 'Jarvis'...")
 
     clap_times      = []
-    wake_word_buf   = []   # raw frames for wake word detection
+    wake_word_buf   = []
     wake_triggered  = False
-    WAKE_BUF_CHUNKS = int(RATE / CHUNK * 2.0)  # 2 second rolling buffer
+    WAKE_BUF_CHUNKS = int(RATE / CHUNK * 3.0)  # 3 second rolling buffer
 
     try:
         while not wake_triggered:
@@ -144,7 +147,6 @@ def listen() -> tuple:
             amplitude = audioop.rms(data, 2)
             wake_word_buf.append(data)
 
-            # Keep rolling 2-second buffer for wake word
             if len(wake_word_buf) > WAKE_BUF_CHUNKS:
                 wake_word_buf.pop(0)
 
@@ -160,10 +162,10 @@ def listen() -> tuple:
                     print("Double clap! Waking up...")
                     wake_triggered = True
                     clap_times = []
+                    break
 
             # ── Wake word detection (check every 2 seconds) ───────────────
             if len(wake_word_buf) >= WAKE_BUF_CHUNKS:
-                # Save buffer to temp file and transcribe quickly
                 tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                 wf  = wave.open(tmp.name, "wb")
                 wf.setnchannels(CHANNELS)
@@ -171,9 +173,8 @@ def listen() -> tuple:
                 wf.setframerate(RATE)
                 wf.writeframes(b"".join(wake_word_buf))
                 wf.close()
-                wake_word_buf = []  # reset buffer
+                wake_word_buf = []
 
-                # Run transcription in background thread so audio doesn't skip
                 def check_wake(path):
                     nonlocal wake_triggered
                     text = _quick_transcribe(path)
@@ -189,8 +190,8 @@ def listen() -> tuple:
         stream.close()
         pa.terminate()
 
-   # Say wake phrase before recording
-    from voice.speaker import wake_response
+   # Say wake phrase then record command
+    time.sleep(1.5)  # give Jarvis time to finish wake phrase before recording
     wake_response()
 
     # Now record the actual command
