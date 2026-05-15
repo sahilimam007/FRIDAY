@@ -146,12 +146,17 @@ def ask_ollama(user_input: str, lang: str = "en") -> str:
 
 def process(user_input: str, lang: str = "en") -> str:
     save_message("user", user_input)
-    result = route(user_input)
-    if result is None:
+    tool_result = route(user_input)
+    if tool_result is None:
         result = ask_ollama(user_input, lang)
+    else:
+        # Pass tool data through Ollama for a natural human-like response
+        result = ask_ollama(
+            f"Here is the data for the user's request '{user_input}':\n{tool_result}\n\nRespond to Sir naturally and conversationally based on this data. Do not dump raw data.",
+            lang
+        )
     save_message("assistant", result)
     return result
-
 
 # ── Terminal test loop ─────────────────────────────────────────────────────────
 
