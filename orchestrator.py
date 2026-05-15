@@ -1,149 +1,179 @@
-import requests
-import json
-import sqlite3
-import os
-from datetime import datetime
-import config
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ── Database setup ────────────────────────────────────────────────────────────
-def init_db():
-    conn = sqlite3.connect(config.SQLITE_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS conversations (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            role      TEXT NOT NULL,
-            content   TEXT NOT NULL,
-            timestamp TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
+import ollama
+from config import OLLAMA_MODEL
 
-def save_message(role: str, content: str):
-    conn = sqlite3.connect(config.SQLITE_PATH)
-    conn.execute(
-        "INSERT INTO conversations (role, content, timestamp) VALUES (?, ?, ?)",
-        (role, content, datetime.now().isoformat())
+from tools.weather   import get_weather
+from tools.news      import get_news
+from tools.search    import search, search_summary
+from tools.browser   import open_url, open_youtube, compose_email, open_maps
+from tools.mac_control import (
+    set_volume, get_battery, open_app, close_app,
+    take_screenshot, sleep_mac, lock_screen
+)
+from memory.memory import save_message, get_recent_history, remember, recall
+
+# ── Keyword router ─────────────────────────────────────────────────────────────
+
+def route(user_input: str) -> str | None:
+    """
+    Check if the input matches a tool keyword.
+    Returns a string response if a tool handles it, else None (falls through to Ollama).
+    """
+    text = user_input.lower().strip()
+
+    # ── Weather ──────────────────────────────────────────────────────────────
+    if any(w in text for w in ["weather", "temperature", "humid", "rain", "forecast"]):
+        return get_weather()
+
+    # ── News ─────────────────────────────────────────────────────────────────
+    if any(w in text for w in ["news", "headlines", "what's happening"]):
+        if "tech"     in text: return get_news("tech")
+        if "india"    in text: return get_news("india")
+        if "science"  in text: return get_news("science")
+        if "business" in text: return get_news("business")
+        if "sport"    in text: return get_news("sports")
+        return get_news("world")
+
+    # ── YouTube ───────────────────────────────────────────────────────────────
+    if "youtube" in text or "play" in text:
+        # extract what comes after "play" or "youtube"
+        for trigger in ["play on youtube", "youtube", "play"]:
+            if trigger in text:
+                query = text.split(trigger, 1)[-1].strip()
+                if query:
+                    return open_youtube(query)
+
+    # ── Maps ──────────────────────────────────────────────────────────────────
+    if any(w in text for w in ["maps", "directions", "navigate to", "where is"]):
+        for trigger in ["navigate to", "directions to", "where is", "maps"]:
+            if trigger in text:
+                place = text.split(trigger, 1)[-1].strip()
+                if place:
+                    return open_maps(place)
+
+    # ── Email ─────────────────────────────────────────────────────────────────
+    if any(w in text for w in ["email", "gmail", "compose", "send mail"]):
+        return compose_email(to="", subject="", body="")
+
+    # ── Volume ────────────────────────────────────────────────────────────────
+    if "volume" in text:
+        for n in range(101):
+            if str(n) in text:
+                return set_volume(n)
+        if "mute" in text:   return set_volume(0)
+        if "max"  in text:   return set_volume(100)
+        if "half" in text:   return set_volume(50)
+
+    # ── Battery ───────────────────────────────────────────────────────────────
+    if any(w in text for w in ["battery", "charge", "power level"]):
+        return get_battery()
+
+    # ── Screenshot ────────────────────────────────────────────────────────────
+    if any(w in text for w in ["screenshot", "screen capture", "capture screen"]):
+        return take_screenshot()
+
+    # ── Sleep / Lock ──────────────────────────────────────────────────────────
+    if "sleep"      in text: return sleep_mac()
+    if "lock"       in text: return lock_screen()
+
+    # ── Open app ──────────────────────────────────────────────────────────────
+    if text.startswith("open "):
+        app = text.replace("open ", "").strip().title()
+        return open_app(app)
+
+    # ── Close app ─────────────────────────────────────────────────────────────
+    if text.startswith("close ") or text.startswith("quit "):
+        app = text.replace("close ", "").replace("quit ", "").strip().title()
+        return close_app(app)
+
+    # ── Web search ────────────────────────────────────────────────────────────
+    if any(w in text for w in ["search", "google", "look up", "find"]):
+        for trigger in ["search for", "search", "google", "look up", "find"]:
+            if trigger in text:
+                query = text.split(trigger, 1)[-1].strip()
+                if query:
+                    return search(query)
+
+    # ── Memory — remember ─────────────────────────────────────────────────────
+    if any(w in text for w in ["remember that", "note that", "don't forget"]):
+        for trigger in ["remember that", "note that", "don't forget"]:
+            if trigger in text:
+                fact = text.split(trigger, 1)[-1].strip()
+                if fact:
+                    return remember(fact)
+
+    # ── Memory — recall ───────────────────────────────────────────────────────
+    if any(w in text for w in ["do you remember", "what do you know about", "recall"]):
+        return recall(text)
+
+    # ── Clear history ─────────────────────────────────────────────────────────
+    if any(w in text for w in ["clear history", "forget conversation", "reset chat"]):
+        from memory.memory import clear_history
+        return clear_history()
+
+    return None  # nothing matched — send to Ollama
+
+
+# ── Ollama call with memory context ───────────────────────────────────────────
+
+def ask_ollama(user_input: str) -> str:
+    # Pull relevant long-term memories
+    memory_context = recall(user_input)
+
+    # Build message list — system + recent history + memory + current input
+    history = get_recent_history(limit=10)
+
+    system_prompt = (
+        "You are Jarvis, a highly intelligent British AI assistant. "
+        "You are witty, precise, and always address the user as Sir. "
+        "Keep responses concise and useful."
     )
-    conn.commit()
-    conn.close()
+    if memory_context:
+        system_prompt += f"\n\n{memory_context}"
 
-def load_recent_history(limit: int = 10) -> list:
-    conn = sqlite3.connect(config.SQLITE_PATH)
-    rows = conn.execute(
-        "SELECT role, content FROM conversations ORDER BY id DESC LIMIT ?",
-        (limit,)
-    ).fetchall()
-    conn.close()
-    # return in chronological order
-    return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
-
-# ── Ollama chat ───────────────────────────────────────────────────────────────
-def ask_ollama(user_input: str, extra_context: str = "") -> str:
-    history = load_recent_history()
-
-    # build system prompt with current time + date
-    now = datetime.now()
-    system = (
-        f"You are JARVIS, the personal AI assistant of Sahil. "
-        f"Always address him as Sir. Be concise, witty, and British. "
-        f"Never mention Ollama or that you are an AI. "
-        f"Current time is {now.strftime('%I:%M %p')} on {now.strftime('%A, %d %B %Y')}. "
-        f"Location: Kolkata, India."
-    )
-
-    if extra_context:
-        system += f"\n\nReal-time data for this query:\n{extra_context}"
-
-    messages = [{"role": "system", "content": system}]
+    messages = [{"role": "system", "content": system_prompt}]
     messages += history
     messages.append({"role": "user", "content": user_input})
 
-    # pick model — try jarvis first, fall back to llama3.2
-    for model in [config.OLLAMA_MODEL, config.OLLAMA_FALLBACK]:
-        try:
-            response = requests.post(
-                f"{config.OLLAMA_URL}/api/chat",
-                json={"model": model, "messages": messages, "stream": False},
-                timeout=config.LLM_TIMEOUT
-            )
-            if response.status_code == 200:
-                data = response.json()
-                reply = data["message"]["content"].strip()
-                save_message("user", user_input)
-                save_message("assistant", reply)
-                return reply
-        except Exception as e:
-            if config.DEBUG:
-                print(f"[Orchestrator] Model {model} failed: {e}")
-            continue
+    response = ollama.chat(model=OLLAMA_MODEL, messages=messages)
+    return response["message"]["content"]
 
-    return "I'm having trouble connecting to my brain, Sir. Please ensure Ollama is running."
 
-# ── Intent detection ──────────────────────────────────────────────────────────
-def detect_intent(text: str) -> str:
-    text = text.lower().strip()
+# ── Main entry point ───────────────────────────────────────────────────────────
 
-    if any(w in text for w in ["weather", "temperature", "forecast", "rain", "hot", "cold"]):
-        return "weather"
-    if any(w in text for w in ["news", "headline", "what's happening", "today", "world"]):
-        return "news"
-    if any(w in text for w in ["open", "launch", "start", "go to", "show me", "browse"]):
-        return "browser"
-    if any(w in text for w in ["search", "look up", "find", "google", "what is", "who is"]):
-        return "search"
-    if any(w in text for w in ["volume", "brightness", "mute", "screenshot", "close", "quit"]):
-        return "mac_control"
-    if any(w in text for w in ["remember", "forget", "what do you know about me"]):
-        return "memory"
-    if any(w in text for w in ["time", "date", "day"]):
-        return "time"
-
-    return "chat"
-
-# ── Time handler ─────────────────────────────────────────────────────────────
-def handle_time() -> str:
-    now = datetime.now()
-    return (
-        f"It is {now.strftime('%I:%M %p')} on {now.strftime('%A, %d %B %Y')}, Sir."
-    )
-
-# ── Main process function ─────────────────────────────────────────────────────
 def process(user_input: str) -> str:
-    if not user_input.strip():
-        return ""
+    # Save what the user said
+    save_message("user", user_input)
 
-    intent = detect_intent(user_input)
+    # Try tools first
+    result = route(user_input)
 
-    if config.DEBUG:
-        print(f"[Orchestrator] Intent: {intent}")
+    # Fall through to Ollama if no tool matched
+    if result is None:
+        result = ask_ollama(user_input)
 
-    # time — no need to call LLM
-    if intent == "time":
-        return handle_time()
+    # Save Jarvis's response
+    save_message("assistant", result)
 
-    # for everything else, call LLM (tools will add context in later phases)
-    return ask_ollama(user_input)
+    return result
 
-# ── Terminal test loop ────────────────────────────────────────────────────────
+
+# ── Terminal test loop ─────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    init_db()
-    print("=" * 50)
-    print("  JARVIS — Terminal Mode")
-    print("  Type 'quit' to exit")
-    print("=" * 50)
-
+    print("Jarvis online. Type 'quit' to exit.\n")
     while True:
         try:
-            user_input = input("\nYou: ").strip()
-            if user_input.lower() in ["quit", "exit", "bye"]:
-                print("Jarvis: Goodbye, Sir. Always a pleasure.")
-                break
-            if not user_input:
+            user = input("You: ").strip()
+            if not user:
                 continue
-            print("Jarvis: thinking...", end="\r")
-            response = process(user_input)
-            print(f"Jarvis: {response}          ")
+            if user.lower() in ["quit", "exit"]:
+                print("Jarvis: Goodbye, Sir.")
+                break
+            response = process(user)
+            print(f"Jarvis: {response}\n")
         except KeyboardInterrupt:
             print("\nJarvis: Shutting down, Sir.")
             break
