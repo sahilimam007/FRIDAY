@@ -118,16 +118,17 @@ def route(user_input: str) -> str | None:
 
 # ── Ollama call with memory context ───────────────────────────────────────────
 
-def ask_ollama(user_input: str) -> str:
-    # Pull relevant long-term memories
+def ask_ollama(user_input: str, lang: str = "en") -> str:
     memory_context = recall(user_input)
-
-    # Build message list — system + recent history + memory + current input
     history = get_recent_history(limit=10)
 
     system_prompt = (
-        "You are Jarvis, a highly intelligent British AI assistant. "
-        "You are witty, precise, and always address the user as Sir. "
+        "You are Jarvis, a highly intelligent AI assistant with British wit. "
+        "You always address the user as Sir. "
+        "IMPORTANT: Always reply in the same language the user spoke. "
+        "If they spoke Hindi, reply in Hindi. "
+        "If they spoke Hinglish (mixed Hindi and English), reply in Hinglish. "
+        "If they spoke English, reply in English. "
         "Keep responses concise and useful."
     )
     if memory_context:
@@ -143,20 +144,12 @@ def ask_ollama(user_input: str) -> str:
 
 # ── Main entry point ───────────────────────────────────────────────────────────
 
-def process(user_input: str) -> str:
-    # Save what the user said
+def process(user_input: str, lang: str = "en") -> str:
     save_message("user", user_input)
-
-    # Try tools first
     result = route(user_input)
-
-    # Fall through to Ollama if no tool matched
     if result is None:
-        result = ask_ollama(user_input)
-
-    # Save Jarvis's response
+        result = ask_ollama(user_input, lang)
     save_message("assistant", result)
-
     return result
 
 
