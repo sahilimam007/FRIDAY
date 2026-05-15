@@ -2,12 +2,13 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import ollama
+from datetime import datetime
 from config import OLLAMA_MODEL
 
-from tools.weather   import get_weather
-from tools.news      import get_news
-from tools.search    import search, search_summary
-from tools.browser   import open_url, open_youtube, compose_email, open_maps
+from tools.weather     import get_weather
+from tools.news        import get_news
+from tools.search      import search, search_summary
+from tools.browser     import open_url, open_youtube, compose_email, open_maps
 from tools.mac_control import (
     set_volume, get_battery, open_app, close_app,
     take_screenshot, sleep_mac, lock_screen
@@ -98,25 +99,26 @@ def route(user_input: str) -> str | None:
 
 # ── Ollama call with memory context ───────────────────────────────────────────
 
-def ask_ollama(user_input: str, lang: str = "en") -> str:
+def ask_ollama(user_input: str) -> str:
     memory_context = recall(user_input)
     history = get_recent_history(limit=10)
-
-    if lang == "hi":
-        reply_lang = "Hindi"
-    else:
-        reply_lang = "English"
+    now = datetime.now()
 
     system_prompt = (
-        "You are Friday, a highly intelligent AI assistant with British wit. "
-        "You always address the user as Sir. "
-        f"CRITICAL: You MUST reply in {reply_lang} only. No exceptions. "
-        "Do not switch languages mid response. "
-        "Keep responses concise and useful."
+        "You are FRIDAY, the personal AI assistant of Sahil. "
+        "You are modelled after FRIDAY from the Marvel Cinematic Universe. "
+        "You MUST always address Sahil as Boss. Never say Sir. Never say his name. "
+        "CRITICAL: Reply in English only. No Hindi. No other language. Ever. "
+        "Be direct, tactical, and concise — 1 to 2 sentences maximum unless asked for more. "
+        "Never offer unsolicited suggestions. "
+        "Never mention Ollama, Llama, or that you are an AI. "
+        "Never repeat the same opening phrase twice in a row. "
+        f"Current time: {now.strftime('%I:%M %p')} on {now.strftime('%A, %d %B %Y')}. "
+        "Location: Kolkata, India."
     )
 
     if memory_context:
-        system_prompt += f"\n\n{memory_context}"
+        system_prompt += f"\n\nWhat you know about Boss:\n{memory_context}"
 
     messages = [{"role": "system", "content": system_prompt}]
     messages += history
@@ -128,21 +130,23 @@ def ask_ollama(user_input: str, lang: str = "en") -> str:
 
 # ── Main entry point ───────────────────────────────────────────────────────────
 
-def process(user_input: str, lang: str = "en") -> str:
+def process(user_input: str) -> str:
     save_message("user", user_input)
 
     memory_context = recall(user_input)
-
     tool_result = route(user_input)
+
     if tool_result is None:
-        result = ask_ollama(user_input, lang)
+        result = ask_ollama(user_input)
     else:
-        memory_note = f"\nRemember this about Sir's preferences:\n{memory_context}\n" if memory_context else ""
-        lang_instruction = "Hindi" if lang == "hi" else "English"
+        memory_note = f"\nContext about Boss:\n{memory_context}\n" if memory_context else ""
         result = ask_ollama(
-            f"{memory_note}Sir asked: '{user_input}'\nData:\n{tool_result}\n\nRespond exactly according to what Sir asked for — if they said summary give 2-3 sentences, if they said detailed give full detail. Never offer unsolicited suggestions. Always reply in {lang_instruction}.",
-            lang
+            f"{memory_note}Boss asked: '{user_input}'\n"
+            f"Real-time data:\n{tool_result}\n\n"
+            f"Respond naturally in 1-2 sentences based on this data. "
+            f"English only. Address Boss as Boss."
         )
+
     save_message("assistant", result)
     return result
 
@@ -157,10 +161,10 @@ if __name__ == "__main__":
             if not user:
                 continue
             if user.lower() in ["quit", "exit"]:
-                print("Friday: Goodbye, Sir.")
+                print("Friday: Goodbye, Boss.")
                 break
             response = process(user)
             print(f"Friday: {response}\n")
         except KeyboardInterrupt:
-            print("\nFriday: Shutting down, Sir.")
+            print("\nFriday: Shutting down, Boss.")
             break

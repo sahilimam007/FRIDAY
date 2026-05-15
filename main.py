@@ -27,7 +27,7 @@ def run():
                 continue
 
             print(f"[FRIDAY] Heard ({lang}): {user_input}")
-            response = process(user_input, lang)
+            response = process(user_input)
             print(f"[FRIDAY] Response: {response}")
             speak(response)
 
@@ -35,7 +35,7 @@ def run():
             speak(random.choice(FOLLOWUPS))
             followup_input = listen_with_timeout(seconds=5)
             if followup_input:
-                response2 = process(followup_input, lang)
+                response2 = process(followup_input)
                 print(f"[FRIDAY] Response: {response2}")
                 speak(response2)
 
