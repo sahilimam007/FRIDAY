@@ -2,19 +2,18 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import feedparser
-import config
 
 FEEDS = {
-    "world":       "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "india":       "https://feeds.feedburner.com/ndtvnews-india-news",
-    "tech":        "https://feeds.feedburner.com/TechCrunch",
-    "science":     "https://www.sciencedaily.com/rss/top/science.xml",
-    "business":    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "sports":      "https://feeds.bbci.co.uk/sport/rss.xml",
+    "world":    "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "india":    "https://feeds.feedburner.com/ndtvnews-india-news",
+    "tech":     "https://feeds.feedburner.com/TechCrunch",
+    "science":  "https://www.sciencedaily.com/rss/top/science.xml",
+    "business": "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "sports":   "https://feeds.bbci.co.uk/sport/rss.xml",
 }
 
 def get_news(topic="world", count=5):
-    url = FEEDS.get(topic.lower(), FEEDS["world"])
+    url  = FEEDS.get(topic.lower(), FEEDS["world"])
     feed = feedparser.parse(url)
 
     if not feed.entries:
@@ -29,9 +28,8 @@ def get_news(topic="world", count=5):
     if not headlines:
         return f"No headlines found for {topic}, Sir."
 
-    intro = f"Here are the top {len(headlines)} {topic} headlines, Sir:\n"
-    numbered = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
-    return intro + numbered
+    # Join with period+space so TTS pauses naturally between headlines
+    return f"Top {topic} headlines. " + ". ".join(headlines) + "."
 
 if __name__ == "__main__":
     for topic in ["world", "india", "tech"]:

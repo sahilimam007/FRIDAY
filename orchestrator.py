@@ -17,17 +17,11 @@ from memory.memory import save_message, get_recent_history, remember, recall
 # ── Keyword router ─────────────────────────────────────────────────────────────
 
 def route(user_input: str) -> str | None:
-    """
-    Check if the input matches a tool keyword.
-    Returns a string response if a tool handles it, else None (falls through to Ollama).
-    """
     text = user_input.lower().strip()
 
-    # ── Weather ──────────────────────────────────────────────────────────────
     if any(w in text for w in ["weather", "temperature", "humid", "rain", "forecast"]):
         return get_weather()
 
-    # ── News ─────────────────────────────────────────────────────────────────
     if any(w in text for w in ["news", "headlines", "what's happening"]):
         if "tech"     in text: return get_news("tech")
         if "india"    in text: return get_news("india")
@@ -36,16 +30,13 @@ def route(user_input: str) -> str | None:
         if "sport"    in text: return get_news("sports")
         return get_news("world")
 
-    # ── YouTube ───────────────────────────────────────────────────────────────
     if "youtube" in text or "play" in text:
-        # extract what comes after "play" or "youtube"
         for trigger in ["play on youtube", "youtube", "play"]:
             if trigger in text:
                 query = text.split(trigger, 1)[-1].strip()
                 if query:
                     return open_youtube(query)
 
-    # ── Maps ──────────────────────────────────────────────────────────────────
     if any(w in text for w in ["maps", "directions", "navigate to", "where is"]):
         for trigger in ["navigate to", "directions to", "where is", "maps"]:
             if trigger in text:
@@ -53,11 +44,9 @@ def route(user_input: str) -> str | None:
                 if place:
                     return open_maps(place)
 
-    # ── Email ─────────────────────────────────────────────────────────────────
     if any(w in text for w in ["email", "gmail", "compose", "send mail"]):
         return compose_email(to="", subject="", body="")
 
-    # ── Volume ────────────────────────────────────────────────────────────────
     if "volume" in text:
         for n in range(101):
             if str(n) in text:
@@ -66,29 +55,23 @@ def route(user_input: str) -> str | None:
         if "max"  in text:   return set_volume(100)
         if "half" in text:   return set_volume(50)
 
-    # ── Battery ───────────────────────────────────────────────────────────────
     if any(w in text for w in ["battery", "charge", "power level"]):
         return get_battery()
 
-    # ── Screenshot ────────────────────────────────────────────────────────────
     if any(w in text for w in ["screenshot", "screen capture", "capture screen"]):
         return take_screenshot()
 
-    # ── Sleep / Lock ──────────────────────────────────────────────────────────
     if "sleep"      in text: return sleep_mac()
     if "lock"       in text: return lock_screen()
 
-    # ── Open app ──────────────────────────────────────────────────────────────
     if text.startswith("open "):
         app = text.replace("open ", "").strip().title()
         return open_app(app)
 
-    # ── Close app ─────────────────────────────────────────────────────────────
     if text.startswith("close ") or text.startswith("quit "):
         app = text.replace("close ", "").replace("quit ", "").strip().title()
         return close_app(app)
 
-    # ── Web search ────────────────────────────────────────────────────────────
     if any(w in text for w in ["search", "google", "look up", "find"]):
         for trigger in ["search for", "search", "google", "look up", "find"]:
             if trigger in text:
@@ -96,7 +79,6 @@ def route(user_input: str) -> str | None:
                 if query:
                     return search(query)
 
-    # ── Memory — remember ─────────────────────────────────────────────────────
     if any(w in text for w in ["remember that", "note that", "don't forget"]):
         for trigger in ["remember that", "note that", "don't forget"]:
             if trigger in text:
@@ -104,16 +86,14 @@ def route(user_input: str) -> str | None:
                 if fact:
                     return remember(fact)
 
-    # ── Memory — recall ───────────────────────────────────────────────────────
     if any(w in text for w in ["do you remember", "what do you know about", "recall"]):
         return recall(text)
 
-    # ── Clear history ─────────────────────────────────────────────────────────
     if any(w in text for w in ["clear history", "forget conversation", "reset chat"]):
         from memory.memory import clear_history
         return clear_history()
 
-    return None  # nothing matched — send to Ollama
+    return None
 
 
 # ── Ollama call with memory context ───────────────────────────────────────────
@@ -122,15 +102,19 @@ def ask_ollama(user_input: str, lang: str = "en") -> str:
     memory_context = recall(user_input)
     history = get_recent_history(limit=10)
 
+    if lang == "hi":
+        reply_lang = "Hindi"
+    else:
+        reply_lang = "English"
+
     system_prompt = (
-        "You are Jarvis, a highly intelligent AI assistant with British wit. "
+        "You are Friday, a highly intelligent AI assistant with British wit. "
         "You always address the user as Sir. "
-        "IMPORTANT: Always reply in the same language the user spoke. "
-        "If they spoke Hindi, reply in Hindi. "
-        "If they spoke Hinglish (mixed Hindi and English), reply in Hinglish. "
-        "If they spoke English, reply in English. "
+        f"CRITICAL: You MUST reply in {reply_lang} only. No exceptions. "
+        "Do not switch languages mid response. "
         "Keep responses concise and useful."
     )
+
     if memory_context:
         system_prompt += f"\n\n{memory_context}"
 
@@ -146,36 +130,37 @@ def ask_ollama(user_input: str, lang: str = "en") -> str:
 
 def process(user_input: str, lang: str = "en") -> str:
     save_message("user", user_input)
-    
-    # Always check memory first
+
     memory_context = recall(user_input)
-    
+
     tool_result = route(user_input)
     if tool_result is None:
         result = ask_ollama(user_input, lang)
     else:
         memory_note = f"\nRemember this about Sir's preferences:\n{memory_context}\n" if memory_context else ""
+        lang_instruction = "Hindi" if lang == "hi" else "English"
         result = ask_ollama(
-            f"{memory_note}Sir asked: '{user_input}'\nData:\n{tool_result}\n\nRespond exactly according to what Sir asked for — if they said summary give 2-3 sentences, if they said detailed give full detail. Never offer unsolicited suggestions about tea, lighting, or anything else.",
+            f"{memory_note}Sir asked: '{user_input}'\nData:\n{tool_result}\n\nRespond exactly according to what Sir asked for — if they said summary give 2-3 sentences, if they said detailed give full detail. Never offer unsolicited suggestions. Always reply in {lang_instruction}.",
             lang
         )
     save_message("assistant", result)
     return result
+
+
 # ── Terminal test loop ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("Jarvis online. Type 'quit' to exit.\n")
+    print("Friday online. Type 'quit' to exit.\n")
     while True:
         try:
             user = input("You: ").strip()
             if not user:
                 continue
             if user.lower() in ["quit", "exit"]:
-                print("Jarvis: Goodbye, Sir.")
+                print("Friday: Goodbye, Sir.")
                 break
             response = process(user)
-            print(f"Jarvis: {response}\n")
+            print(f"Friday: {response}\n")
         except KeyboardInterrupt:
-            print("\nJarvis: Shutting down, Sir.")
+            print("\nFriday: Shutting down, Sir.")
             break
-        

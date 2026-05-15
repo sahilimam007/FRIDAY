@@ -20,6 +20,22 @@ WAKE_RESPONSES = [
     "Standing by, Sir. What is it?",
     "Ready when you are, Sir.",
 ]
+SHUTDOWN_RESPONSES = [
+    "Shutting down. Goodbye, Sir. See you soon.",
+    "Going offline, Sir. Do try not to break anything while I'm gone.",
+    "Signing off, Sir. It's been a pleasure.",
+    "Powering down. Take care, Sir.",
+    "offline now, Sir. Until next time.",
+    "Shutting down systems. Farewell, Sir.",
+    "Going dark, Sir. Don't hesitate to call.",
+    "Systems offline. Rest well, Sir.",
+]
+
+def shutdown_response():
+    """Random shutdown phrase."""
+    phrase = random.choice(SHUTDOWN_RESPONSES)
+    speak(phrase)
+    return phrase
 
 def stop_speaking():
     """Kill current speech immediately."""

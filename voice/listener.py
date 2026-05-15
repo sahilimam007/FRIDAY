@@ -35,7 +35,7 @@ MAX_RECORD_SECONDS = 15
 # ── Transcribe any WAV file ────────────────────────────────────────────────────
 
 def transcribe(audio_path: str) -> tuple:
-    segments, info = whisper.transcribe(audio_path)
+    segments, info = whisper.transcribe(audio_path, language="en")
     detected_lang  = info.language
     text = " ".join(s.text.strip() for s in segments).strip()
     os.unlink(audio_path)
@@ -93,7 +93,7 @@ def record_until_silence() -> str:
     return tmp.name
 
 
-# ── Continuous background listening for "Jarvis" wake word ────────────────────
+# ── Continuous background listening for "Friday" wake word ────────────────────
 
 def _record_chunk(seconds: float = 2.0) -> str:
     """Record a short chunk for wake word detection."""
@@ -124,7 +124,7 @@ def listen() -> tuple:
     """
     Waits for either:
     - Double clap  → wake up
-    - "Jarvis"     → wake up
+    - "Friday"     → wake up
     Then records until silence and returns (text, language).
     """
     from voice.speaker import stop_speaking, wake_response
@@ -134,7 +134,7 @@ def listen() -> tuple:
     stream = pa.open(format=FORMAT, channels=CHANNELS, rate=RATE,
                      input=True, frames_per_buffer=CHUNK)
 
-    print("\nReady — double clap or say 'Jarvis'...")
+    print("\nReady — double clap or say 'Friday'...")
 
     clap_times      = []
     wake_word_buf   = []
@@ -178,7 +178,7 @@ def listen() -> tuple:
                 def check_wake(path):
                     nonlocal wake_triggered
                     text = _quick_transcribe(path)
-                    if "jarvis" in text:
+                    if "Friday" in text:
                         print(f"Wake word detected: '{text}'")
                         wake_triggered = True
 
@@ -191,7 +191,7 @@ def listen() -> tuple:
         pa.terminate()
 
    # Say wake phrase then record command
-    time.sleep(1.5)  # give Jarvis time to finish wake phrase before recording
+    time.sleep(1.5)  # give Friday time to finish wake phrase before recording
     wake_response()
 
     # Now record the actual command
@@ -200,11 +200,50 @@ def listen() -> tuple:
     print(f"Heard ({lang}): {text}")
     return text, lang
 
+# ── Listen with timeout (for follow-up) ───────────────────────────────────────
+def listen_with_timeout(seconds: int = 5) -> str | None:
+    """Listen for a short period, return text or None if silent."""
+    pa     = pyaudio.PyAudio()
+    stream = pa.open(format=FORMAT, channels=CHANNELS, rate=RATE,
+                     input=True, frames_per_buffer=CHUNK)
+    frames = []
+    max_chunks    = int(RATE / CHUNK * seconds)
+    silence_limit = int(RATE / CHUNK * SILENCE_SECONDS)
+    silent_chunks = 0
+    got_speech    = False
 
+    for _ in range(max_chunks):
+        data      = stream.read(CHUNK, exception_on_overflow=False)
+        amplitude = audioop.rms(data, 2)
+        frames.append(data)
+        if amplitude > SILENCE_THRESHOLD * 3:
+            got_speech = True
+            silent_chunks = 0
+        elif got_speech:
+            silent_chunks += 1
+            if silent_chunks >= silence_limit:
+                break
+
+    stream.stop_stream()
+    stream.close()
+    pa.terminate()
+
+    if not got_speech:
+        return None
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    wf  = wave.open(tmp.name, "wb")
+    wf.setnchannels(CHANNELS)
+    wf.setsampwidth(pyaudio.PyAudio().get_sample_size(FORMAT))
+    wf.setframerate(RATE)
+    wf.writeframes(b"".join(frames))
+    wf.close()
+    text, _ = transcribe(tmp.name)
+    return text if text.strip() else None
 # ── Test ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("Say 'Jarvis' or double clap. Ctrl+C to quit.\n")
+    print("Say 'Friday' or double clap. Ctrl+C to quit.\n")
     while True:
         text, lang = listen()
         if text:

@@ -1,7 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 import config
 
 def search(query, max_results=5):
