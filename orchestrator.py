@@ -39,8 +39,13 @@ from tools.mac_control import (
     summarise_clipboard, fix_grammar_clipboard, explain_code_clipboard, translate_text,
     get_stock_price, get_cricket_score, get_joke, get_motivation, define_word, wikipedia_summary,
 )
-from tools.reminder import set_reminder, list_reminders, cancel_reminders
-from memory.memory  import save_message, get_recent_history, remember, recall
+from tools.reminder     import set_reminder, list_reminders, cancel_reminders
+from tools.productivity import (
+    start_pomodoro, stop_pomodoro, pomodoro_status,
+    focus_mode as productivity_focus_mode,
+    meeting_mode, end_of_day_summary
+)
+from memory.memory      import save_message, get_recent_history, remember, recall
 
 # ── Tool list for classifier ───────────────────────────────────────────────────
 
@@ -72,6 +77,8 @@ translate_text(text, language), get_stock_price(symbol),
 get_cricket_score, get_joke, get_motivation, define_word(word),
 wikipedia_summary(topic), set_reminder(duration, label),
 list_reminders, cancel_reminders, remember(fact), recall(query),
+start_pomodoro, stop_pomodoro, pomodoro_status,
+meeting_mode, end_of_day_summary,
 clear_history, chat
 """
 
@@ -306,6 +313,11 @@ def execute_tool(tool: str, param: str) -> str | None:
     if t == "cancel_reminders":         return cancel_reminders()
     if t == "remember":                 return remember(p)
     if t == "recall":                   return recall(p)
+    if t == "start_pomodoro":           return start_pomodoro()
+    if t == "stop_pomodoro":            return stop_pomodoro()
+    if t == "pomodoro_status":          return pomodoro_status()
+    if t == "meeting_mode":             return meeting_mode()
+    if t == "end_of_day_summary":       return end_of_day_summary()
     if t == "clear_history":
         from memory.memory import clear_history
         return clear_history()
