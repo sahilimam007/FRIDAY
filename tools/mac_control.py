@@ -7,6 +7,7 @@ import json
 import math
 import time
 import threading
+import re
 import config
 
 def run_applescript(script):
@@ -29,6 +30,21 @@ def close_app(app_name):
     run_applescript(f'tell application "{app_name}" to quit')
     return f"Closing {app_name}, Boss."
 
+def force_quit(app_name):
+    script = f'tell application "System Events" to tell process "{app_name}" to delete'
+    subprocess.run(["pkill", "-f", app_name])
+    return f"Force quitting {app_name}, Boss."
+
+def switch_to_app(app_name):
+    run_applescript(f'tell application "{app_name}" to activate')
+    return f"Switched to {app_name}, Boss."
+
+def list_running_apps():
+    script = 'tell application "System Events" to get name of every process whose background only is false'
+    result = run_applescript(script)
+    apps = result.replace(",", ", ")
+    return f"Running apps: {apps}, Boss."
+
 def minimize_window():
     run_applescript('tell application "System Events" to keystroke "m" using command down')
     return "Minimized, Boss."
@@ -44,6 +60,64 @@ def show_desktop():
 def empty_trash():
     run_applescript('tell application "Finder" to empty trash')
     return "Trash emptied, Boss."
+
+def restart_mac():
+    run_applescript('tell application "System Events" to restart')
+    return "Restarting, Boss."
+
+def shutdown_mac():
+    run_applescript('tell application "System Events" to shut down')
+    return "Shutting down, Boss."
+
+# ── Window control ─────────────────────────────────────────────────────────────
+
+def snap_left():
+    run_applescript('''
+    tell application "System Events"
+        keystroke "left" using {control down, option down}
+    end tell
+    ''')
+    return "Window snapped left, Boss."
+
+def snap_right():
+    run_applescript('''
+    tell application "System Events"
+        keystroke "right" using {control down, option down}
+    end tell
+    ''')
+    return "Window snapped right, Boss."
+
+def fullscreen():
+    run_applescript('''
+    tell application "System Events"
+        keystroke "f" using {control down, command down}
+    end tell
+    ''')
+    return "Toggled full screen, Boss."
+
+def close_tab():
+    run_applescript('''
+    tell application "System Events"
+        keystroke "w" using command down
+    end tell
+    ''')
+    return "Tab closed, Boss."
+
+def new_tab():
+    run_applescript('''
+    tell application "System Events"
+        keystroke "t" using command down
+    end tell
+    ''')
+    return "New tab opened, Boss."
+
+def picture_in_picture():
+    run_applescript('''
+    tell application "System Events"
+        keystroke "p" using {option down, command down}
+    end tell
+    ''')
+    return "Picture in picture toggled, Boss."
 
 # ── Volume ─────────────────────────────────────────────────────────────────────
 
@@ -90,23 +164,16 @@ def get_battery():
 
 def get_system_info():
     try:
-        # RAM
         vm = subprocess.run(["vm_stat"], capture_output=True, text=True).stdout
-        pages_free    = int([l for l in vm.split("\n") if "Pages free" in l][0].split(":")[1].strip().rstrip("."))
-        pages_active  = int([l for l in vm.split("\n") if "Pages active" in l][0].split(":")[1].strip().rstrip("."))
-        pages_wired   = int([l for l in vm.split("\n") if "Pages wired" in l][0].split(":")[1].strip().rstrip("."))
-        page_size     = 16384
-        used_gb  = round((pages_active + pages_wired) * page_size / (1024**3), 1)
-        free_gb  = round(pages_free * page_size / (1024**3), 1)
-        # Disk
+        pages_free   = int([l for l in vm.split("\n") if "Pages free" in l][0].split(":")[1].strip().rstrip("."))
+        pages_active = int([l for l in vm.split("\n") if "Pages active" in l][0].split(":")[1].strip().rstrip("."))
+        pages_wired  = int([l for l in vm.split("\n") if "Pages wired" in l][0].split(":")[1].strip().rstrip("."))
+        page_size    = 16384
+        used_gb = round((pages_active + pages_wired) * page_size / (1024**3), 1)
+        free_gb = round(pages_free * page_size / (1024**3), 1)
         df = subprocess.run(["df", "-h", "/"], capture_output=True, text=True).stdout.split("\n")[1].split()
-        disk_used = df[2]
-        disk_free = df[3]
-        # CPU
-        cpu = subprocess.run(["top", "-l", "1", "-n", "0"], capture_output=True, text=True).stdout
-        cpu_line = [l for l in cpu.split("\n") if "CPU usage" in l]
-        cpu_info = cpu_line[0] if cpu_line else "CPU info unavailable"
-        return f"RAM: {used_gb}GB used, {free_gb}GB free. Disk: {disk_used} used, {disk_free} free. {cpu_info}, Boss."
+        disk_used = df[2]; disk_free = df[3]
+        return f"RAM: {used_gb}GB used, {free_gb}GB free. Disk: {disk_used} used, {disk_free} free, Boss."
     except Exception as e:
         return f"Couldn't get system info, Boss: {e}"
 
@@ -121,6 +188,15 @@ def get_ip():
     except:
         return "Couldn't get IP address, Boss."
 
+def ping_host(host: str):
+    try:
+        result = subprocess.run(["ping", "-c", "3", host], capture_output=True, text=True, timeout=10)
+        lines = result.stdout.strip().split("\n")
+        summary = lines[-1] if lines else "No response"
+        return f"Ping to {host}: {summary}, Boss."
+    except Exception as e:
+        return f"Ping failed, Boss: {e}"
+
 # ── Wi-Fi & Bluetooth ──────────────────────────────────────────────────────────
 
 def wifi_on():
@@ -132,25 +208,15 @@ def wifi_off():
     return "Wi-Fi turned off, Boss."
 
 def bluetooth_on():
-    run_applescript('do shell script "blueutil --power 1"')
+    subprocess.run(["blueutil", "--power", "1"], capture_output=True)
     return "Bluetooth turned on, Boss."
 
 def bluetooth_off():
-    run_applescript('do shell script "blueutil --power 0"')
+    subprocess.run(["blueutil", "--power", "0"], capture_output=True)
     return "Bluetooth turned off, Boss."
 
-# ── Do Not Disturb ─────────────────────────────────────────────────────────────
-
 def do_not_disturb_on():
-    script = '''
-    tell application "System Events"
-        tell process "Control Center"
-            click menu bar item "Control Center" of menu bar 1
-        end tell
-    end tell
-    '''
-    run_applescript(script)
-    return "Do Not Disturb enabled, Boss."
+    return "Do Not Disturb toggled, Boss. Use Focus in Control Centre to confirm."
 
 def do_not_disturb_off():
     return "Do Not Disturb disabled, Boss."
@@ -162,19 +228,116 @@ def get_clipboard():
     content = result.stdout.strip()
     if not content:
         return "Clipboard is empty, Boss."
-    return f"Clipboard contains: {content[:200]}"
+    return f"Clipboard contains: {content[:300]}"
 
 def set_clipboard(text: str):
     subprocess.run(["pbcopy"], input=text.encode())
     return f"Copied to clipboard, Boss."
 
-def type_text(text):
+def type_text(text: str):
     pyautogui.typewrite(text, interval=0.05)
-    return f"Typed: {text}"
+    return f"Typed: {text}, Boss."
 
-def press_key(key):
+def press_key(key: str):
     pyautogui.press(key)
     return f"Pressed {key}, Boss."
+
+# ── File operations ───────────────────────────────────────────────────────────
+
+def find_file(filename: str) -> str:
+    try:
+        result = subprocess.run(
+            ["mdfind", "-name", filename],
+            capture_output=True, text=True, timeout=10
+        )
+        paths = result.stdout.strip().split("\n")
+        paths = [p for p in paths if p and ".Trash" not in p][:5]
+        if not paths:
+            return f"Couldn't find any file named {filename}, Boss."
+        return f"Found: " + ", ".join(paths)
+    except Exception as e:
+        return f"File search failed, Boss: {e}"
+
+def open_file_or_folder(name: str) -> str:
+    """Find and open a file or folder in Finder."""
+    try:
+        # common folders first
+        common = {
+            "downloads": "~/Downloads", "desktop": "~/Desktop",
+            "documents": "~/Documents", "pictures": "~/Pictures",
+            "music": "~/Music", "movies": "~/Movies",
+            "developer": "~/Developer", "friday": "~/Developer/friday",
+        }
+        key = name.lower().strip()
+        for k, path in common.items():
+            if k in key:
+                subprocess.Popen(["open", os.path.expanduser(path)])
+                return f"Opened {k.title()} folder, Boss."
+
+        # search for it
+        result = subprocess.run(
+            ["mdfind", "-name", name],
+            capture_output=True, text=True, timeout=10
+        )
+        paths = result.stdout.strip().split("\n")
+        paths = [p for p in paths if p and ".Trash" not in p]
+        if paths:
+            subprocess.Popen(["open", paths[0]])
+            return f"Opened {paths[0]}, Boss."
+        return f"Couldn't find {name}, Boss."
+    except Exception as e:
+        return f"Couldn't open {name}, Boss: {e}"
+
+def create_folder(name: str, location: str = "~/Desktop") -> str:
+    path = os.path.expanduser(f"{location}/{name}")
+    os.makedirs(path, exist_ok=True)
+    return f"Created folder '{name}' on Desktop, Boss."
+
+def list_files(folder: str = "~/Downloads") -> str:
+    common = {
+        "downloads": "~/Downloads", "desktop": "~/Desktop",
+        "documents": "~/Documents", "developer": "~/Developer",
+    }
+    for k, path in common.items():
+        if k in folder.lower():
+            folder = path
+            break
+    path = os.path.expanduser(folder)
+    if not os.path.exists(path):
+        return f"Folder not found, Boss."
+    files = os.listdir(path)[:10]
+    files = [f for f in files if not f.startswith(".")]
+    return f"Files in {folder}: " + ", ".join(files) + ", Boss."
+
+def move_file(filename: str, destination: str) -> str:
+    try:
+        result = subprocess.run(["mdfind", "-name", filename], capture_output=True, text=True, timeout=8)
+        paths = [p for p in result.stdout.strip().split("\n") if p and ".Trash" not in p]
+        if not paths:
+            return f"Couldn't find {filename}, Boss."
+        src = paths[0]
+        dest_map = {
+            "desktop": "~/Desktop", "downloads": "~/Downloads",
+            "documents": "~/Documents", "developer": "~/Developer",
+        }
+        dest_path = os.path.expanduser(dest_map.get(destination.lower(), f"~/{destination}"))
+        subprocess.run(["mv", src, dest_path])
+        return f"Moved {filename} to {destination}, Boss."
+    except Exception as e:
+        return f"Move failed, Boss: {e}"
+
+def delete_file(filename: str) -> str:
+    try:
+        result = subprocess.run(["mdfind", "-name", filename], capture_output=True, text=True, timeout=8)
+        paths = [p for p in result.stdout.strip().split("\n") if p and ".Trash" not in p]
+        if not paths:
+            return f"Couldn't find {filename}, Boss."
+        subprocess.run(["trash", paths[0]], capture_output=True)
+        if subprocess.run(["trash", "--version"], capture_output=True).returncode != 0:
+            subprocess.run(["mv", paths[0], os.path.expanduser("~/.Trash/")])
+        return f"Moved {filename} to Trash, Boss."
+    except Exception as e:
+        return f"Delete failed, Boss: {e}"
 
 # ── Apple Music ────────────────────────────────────────────────────────────────
 
@@ -261,22 +424,21 @@ def calculate(expression: str) -> str:
 
 def convert_units(expression: str) -> str:
     try:
-        expr = expression.lower()
         conversions = {
-            ("miles", "km"):        lambda x: x * 1.60934,
-            ("km", "miles"):        lambda x: x * 0.621371,
-            ("kg", "pounds"):       lambda x: x * 2.20462,
-            ("pounds", "kg"):       lambda x: x * 0.453592,
+            ("miles", "km"):           lambda x: x * 1.60934,
+            ("km", "miles"):           lambda x: x * 0.621371,
+            ("kg", "pounds"):          lambda x: x * 2.20462,
+            ("pounds", "kg"):          lambda x: x * 0.453592,
             ("celsius", "fahrenheit"): lambda x: x * 9/5 + 32,
             ("fahrenheit", "celsius"): lambda x: (x - 32) * 5/9,
-            ("meters", "feet"):     lambda x: x * 3.28084,
-            ("feet", "meters"):     lambda x: x * 0.3048,
-            ("liters", "gallons"):  lambda x: x * 0.264172,
-            ("gallons", "liters"):  lambda x: x * 3.78541,
-            ("inches", "cm"):       lambda x: x * 2.54,
-            ("cm", "inches"):       lambda x: x * 0.393701,
+            ("meters", "feet"):        lambda x: x * 3.28084,
+            ("feet", "meters"):        lambda x: x * 0.3048,
+            ("liters", "gallons"):     lambda x: x * 0.264172,
+            ("gallons", "liters"):     lambda x: x * 3.78541,
+            ("inches", "cm"):          lambda x: x * 2.54,
+            ("cm", "inches"):          lambda x: x * 0.393701,
         }
-        import re
+        expr = expression.lower()
         match = re.search(r'([\d.]+)', expr)
         if not match:
             return "Couldn't find a number to convert, Boss."
@@ -293,7 +455,7 @@ def convert_units(expression: str) -> str:
 
 def convert_currency(expression: str) -> str:
     try:
-        import re, requests
+        import requests
         match = re.search(r'([\d.]+)', expression)
         if not match:
             return "Couldn't find an amount, Boss."
@@ -304,19 +466,16 @@ def convert_currency(expression: str) -> str:
             "euro": "EUR", "euros": "EUR", "eur": "EUR",
             "pound": "GBP", "pounds": "GBP", "gbp": "GBP",
             "rupee": "INR", "rupees": "INR", "inr": "INR",
-            "yen": "JPY", "jpy": "JPY",
-            "yuan": "CNY", "cny": "CNY",
+            "yen": "JPY", "jpy": "JPY", "yuan": "CNY", "cny": "CNY",
         }
-        from_cur = to_cur = None
-        words = expr.split()
         found = []
-        for word in words:
+        for word in expr.split():
+            word = word.strip(".,")
             if word in currencies:
                 found.append(currencies[word])
-        if len(found) >= 2:
-            from_cur, to_cur = found[0], found[1]
-        else:
+        if len(found) < 2:
             return "Couldn't understand the currencies, Boss."
+        from_cur, to_cur = found[0], found[1]
         url = f"https://open.er-api.com/v6/latest/{from_cur}"
         resp = requests.get(url, timeout=5).json()
         rate = resp["rates"][to_cur]
@@ -342,16 +501,11 @@ def stop_stopwatch():
     _stopwatch_start = None
     mins = int(elapsed // 60)
     secs = int(elapsed % 60)
-    return f"Stopwatch stopped. Elapsed: {mins}m {secs}s, Boss."
+    return f"Stopped. Elapsed time: {mins}m {secs}s, Boss."
 
 def set_timer(duration_str: str, label: str = "Timer") -> str:
-    import re
     total_seconds = 0
-    patterns = [
-        (r'(\d+)\s*hour', 3600),
-        (r'(\d+)\s*minute', 60),
-        (r'(\d+)\s*second', 1),
-    ]
+    patterns = [(r'(\d+)\s*hour', 3600), (r'(\d+)\s*minute', 60), (r'(\d+)\s*second', 1)]
     for pattern, multiplier in patterns:
         match = re.search(pattern, duration_str.lower())
         if match:
@@ -387,7 +541,7 @@ def start_pomodoro():
     threading.Thread(target=run, daemon=True).start()
     return "Pomodoro started. 25 minutes on the clock, Boss."
 
-# ── Focus / Vibe / Night modes ────────────────────────────────────────────────
+# ── Modes ─────────────────────────────────────────────────────────────────────
 
 def focus_mode():
     run_applescript('tell application "Music" to pause')
@@ -397,11 +551,10 @@ def focus_mode():
 def vibe_mode():
     run_applescript('tell application "Music" to play')
     run_applescript("set volume output volume 60")
-    return "Vibe mode on. Music playing, volume set to 60, Boss."
+    return "Vibe mode on. Music playing, volume at 60, Boss."
 
 def night_mode():
     run_applescript("set volume output volume 20")
-    subprocess.run(["brightness", "0.1"], capture_output=True)
     return "Night mode on. Volume lowered, Boss."
 
 # ── Notes ─────────────────────────────────────────────────────────────────────
@@ -412,7 +565,7 @@ def take_note(note: str) -> str:
     ts = time.strftime("%Y-%m-%d %H:%M")
     with open(NOTES_PATH, "a") as f:
         f.write(f"[{ts}] {note}\n")
-    return f"Note saved, Boss."
+    return "Note saved, Boss."
 
 def read_notes() -> str:
     if not os.path.exists(NOTES_PATH):
@@ -424,31 +577,12 @@ def read_notes() -> str:
     lines = content.split("\n")[-5:]
     return "Your last notes: " + ". ".join(lines)
 
-# ── File finder ───────────────────────────────────────────────────────────────
-
-def find_file(filename: str) -> str:
-    try:
-        result = subprocess.run(
-            ["mdfind", "-name", filename],
-            capture_output=True, text=True, timeout=10
-        )
-        paths = result.stdout.strip().split("\n")
-        paths = [p for p in paths if p and ".Trash" not in p][:5]
-        if not paths:
-            return f"Couldn't find any file named {filename}, Boss."
-        return f"Found {len(paths)} file(s): " + ", ".join(paths)
-    except Exception as e:
-        return f"File search failed, Boss: {e}"
-
 # ── Developer tools ───────────────────────────────────────────────────────────
 
 def git_status(path: str = None) -> str:
     try:
         cwd = path or os.path.expanduser("~/Developer")
-        result = subprocess.run(
-            ["git", "status", "--short"],
-            capture_output=True, text=True, cwd=cwd
-        )
+        result = subprocess.run(["git", "status", "--short"], capture_output=True, text=True, cwd=cwd)
         if result.returncode != 0:
             return "Not a git repo or git error, Boss."
         output = result.stdout.strip()
@@ -460,9 +594,7 @@ def git_status(path: str = None) -> str:
 
 def run_terminal_command(command: str) -> str:
     try:
-        result = subprocess.run(
-            command, shell=True, capture_output=True, text=True, timeout=15
-        )
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=15)
         output = (result.stdout + result.stderr).strip()
         return output[:300] if output else "Command ran with no output, Boss."
     except subprocess.TimeoutExpired:
@@ -481,12 +613,8 @@ def open_vscode_project(project: str) -> str:
 
 def kill_port(port: str) -> str:
     try:
-        result = subprocess.run(
-            ["lsof", "-ti", f":{port}"],
-            capture_output=True, text=True
-        )
-        pids = result.stdout.strip().split("\n")
-        pids = [p for p in pids if p]
+        result = subprocess.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True)
+        pids = [p for p in result.stdout.strip().split("\n") if p]
         if not pids:
             return f"Nothing running on port {port}, Boss."
         for pid in pids:
@@ -497,10 +625,7 @@ def kill_port(port: str) -> str:
 
 def check_server(port: str = "8000") -> str:
     try:
-        result = subprocess.run(
-            ["lsof", "-ti", f":{port}"],
-            capture_output=True, text=True
-        )
+        result = subprocess.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True)
         pids = result.stdout.strip()
         if pids:
             return f"Yes, something is running on port {port}, Boss."
@@ -512,22 +637,152 @@ def check_server(port: str = "8000") -> str:
 
 def open_whatsapp_chat(contact: str = "") -> str:
     subprocess.Popen(["open", "-a", "WhatsApp"])
-    return f"Opening WhatsApp, Boss. You'll need to select {contact} manually."
+    if contact:
+        return f"Opening WhatsApp, Boss. Search for {contact} to message them."
+    return "Opening WhatsApp, Boss."
 
-# ── Picture in picture ────────────────────────────────────────────────────────
+# ── AI powered clipboard tools ────────────────────────────────────────────────
 
-def picture_in_picture():
-    run_applescript('''
-    tell application "System Events"
-        keystroke "p" using {option down, command down}
-    end tell
-    ''')
-    return "Picture in picture toggled, Boss."
+def summarise_clipboard() -> str:
+    result = subprocess.run(["pbpaste"], capture_output=True, text=True)
+    content = result.stdout.strip()
+    if not content:
+        return "Clipboard is empty, Boss."
+    return f"SUMMARISE_THIS:{content[:1500]}"
+
+def fix_grammar_clipboard() -> str:
+    result = subprocess.run(["pbpaste"], capture_output=True, text=True)
+    content = result.stdout.strip()
+    if not content:
+        return "Clipboard is empty, Boss."
+    return f"FIX_GRAMMAR:{content[:1500]}"
+
+def explain_code_clipboard() -> str:
+    result = subprocess.run(["pbpaste"], capture_output=True, text=True)
+    content = result.stdout.strip()
+    if not content:
+        return "Clipboard is empty, Boss."
+    return f"EXPLAIN_CODE:{content[:1500]}"
+
+def translate_text(text: str, target_lang: str = "Spanish") -> str:
+    return f"TRANSLATE:{text}|TO:{target_lang}"
+
+# ── Web info ──────────────────────────────────────────────────────────────────
+
+def get_stock_price(symbol: str) -> str:
+    try:
+        import requests
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1d"
+        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5).json()
+        price = resp["chart"]["result"][0]["meta"]["regularMarketPrice"]
+        currency = resp["chart"]["result"][0]["meta"]["currency"]
+        return f"{symbol.upper()} is trading at {price} {currency}, Boss."
+    except Exception as e:
+        return f"Couldn't get stock price for {symbol}, Boss: {e}"
+
+def get_cricket_score() -> str:
+    try:
+        import requests
+        result = requests.get(
+            "https://www.cricbuzz.com/cricket-match/live-scores",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=5
+        )
+        if "live" in result.text.lower():
+            return "There are live cricket matches on. Check Cricbuzz for scores, Boss."
+        return "No live cricket matches right now, Boss."
+    except:
+        return "Couldn't fetch cricket scores right now, Boss."
+
+# ── PASTE THIS OVER the existing get_joke() in tools/mac_control.py ───────────
+
+def get_joke() -> str:
+    import random
+    import requests
+
+    # Try JokeAPI — best quality, safe filter on
+    try:
+        resp = requests.get(
+            "https://v2.jokeapi.dev/joke/Programming,Misc?blacklistFlags=nsfw,racist,sexist,explicit&type=twopart",
+            timeout=5
+        ).json()
+        if resp.get("type") == "twopart":
+            return f"{resp['setup']} ... {resp['delivery']}"
+    except:
+        pass
+
+    # Backup: icanhazdadjoke
+    try:
+        resp = requests.get(
+            "https://icanhazdadjoke.com/",
+            headers={"Accept": "application/json"},
+            timeout=5
+        ).json()
+        if resp.get("joke"):
+            return resp["joke"]
+    except:
+        pass
+
+    # Offline fallback — strong list
+    jokes = [
+        "Why do programmers always mix up Halloween and Christmas? Because Oct 31 equals Dec 25, Boss.",
+        "A SQL query walks into a bar, approaches two tables and asks — can I join you?, Boss.",
+        "Why do Java developers wear glasses? Because they don't C#, Boss.",
+        "I told my computer I needed a break. Now it won't stop sending me Kit Kat ads, Boss.",
+        "Why did the developer go broke? Because he used up all his cache, Boss.",
+        "There are 10 types of people in the world — those who understand binary and those who don't, Boss.",
+        "Why was the JavaScript developer sad? Because he didn't Node how to Express himself, Boss.",
+        "A programmer's partner says go to the store, get a litre of milk, and if they have eggs get a dozen. He came back with 12 litres of milk. They had eggs, Boss.",
+        "Why do programmers prefer dark mode? Because light attracts bugs, Boss.",
+        "How many programmers does it take to change a light bulb? None — that's a hardware problem, Boss.",
+        "A byte walks into a bar looking pale. The bartender asks what's wrong. The byte says — I had a bit removed, Boss.",
+        "Why did the computer catch a cold? It left its Windows open, Boss.",
+        "Why do programmers hate nature? Too many bugs and no documentation, Boss.",
+        "I would tell you a UDP joke but you might not get it, Boss.",
+        "Why was the function sad after a breakup? It didn't get closure, Boss.",
+        "An SEO expert walks into a bar, bars, pub, public house, Irish pub, drinks, beer, Boss.",
+    ]
+    return random.choice(jokes).replace(", Boss.", "")
+
+def get_motivation() -> str:
+    import random
+    quotes = [
+        "The only way to do great work is to love what you do. — Steve Jobs",
+        "Code is like humour. When you have to explain it, it's bad. — Cory House",
+        "First, solve the problem. Then, write the code. — John Johnson",
+        "The best time to plant a tree was 20 years ago. The second best time is now.",
+        "Push yourself, because no one else is going to do it for you.",
+        "Dream it. Wish it. Do it.",
+        "Great things never come from comfort zones.",
+    ]
+    return random.choice(quotes) + ", Boss."
+
+def define_word(word: str) -> str:
+    try:
+        import requests
+        resp = requests.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}", timeout=5).json()
+        if isinstance(resp, list):
+            meaning = resp[0]["meanings"][0]["definitions"][0]["definition"]
+            return f"{word}: {meaning}, Boss."
+        return f"Couldn't find definition for {word}, Boss."
+    except Exception as e:
+        return f"Dictionary lookup failed, Boss: {e}"
+
+def wikipedia_summary(topic: str) -> str:
+    try:
+        import requests
+        url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{topic.replace(' ', '_')}"
+        resp = requests.get(url, timeout=5).json()
+        extract = resp.get("extract", "")
+        if extract:
+            return extract[:400] + "..."
+        return f"Couldn't find Wikipedia article for {topic}, Boss."
+    except Exception as e:
+        return f"Wikipedia lookup failed, Boss: {e}"
 
 if __name__ == "__main__":
     print(get_battery())
     print(get_system_info())
     print(calculate("15 percent of 8500"))
     print(convert_units("5 miles to km"))
-    print(find_file("resume"))
-    
+    print(get_joke())
+    print(define_word("serendipity"))
