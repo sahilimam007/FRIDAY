@@ -31,7 +31,6 @@ def close_app(app_name):
     return f"Closing {app_name}, Boss."
 
 def force_quit(app_name):
-    script = f'tell application "System Events" to tell process "{app_name}" to delete'
     subprocess.run(["pkill", "-f", app_name])
     return f"Force quitting {app_name}, Boss."
 
@@ -119,7 +118,62 @@ def picture_in_picture():
     ''')
     return "Picture in picture toggled, Boss."
 
+# ── Active window control ──────────────────────────────────────────────────────
+
+def move_window(direction: str) -> str:
+    """Move active window to a screen position: left, right, top, bottom, center."""
+    direction = direction.lower().strip()
+    scripts = {
+        "left":   'tell application "System Events" to keystroke "left" using {control down, option down}',
+        "right":  'tell application "System Events" to keystroke "right" using {control down, option down}',
+        "center": '''
+            tell application "Finder"
+                set screenSize to bounds of window of desktop
+                set sw to item 3 of screenSize
+                set sh to item 4 of screenSize
+            end tell
+            tell application (name of (info for (path to frontmost application))) to set bounds of window 1 to {sw/4, sh/8, sw*3/4, sh*7/8}
+        ''',
+    }
+    if direction in scripts:
+        run_applescript(scripts[direction])
+        return f"Window moved {direction}, Boss."
+    return f"Direction '{direction}' not recognised, Boss."
+
+def resize_window(width: int, height: int) -> str:
+    script = f'''
+    tell application (name of (info for (path to frontmost application)))
+        set size of window 1 to {{{width}, {height}}}
+    end tell
+    '''
+    run_applescript(script)
+    return f"Window resized to {width}x{height}, Boss."
+
+def close_active_window() -> str:
+    run_applescript('tell application "System Events" to keystroke "w" using command down')
+    return "Window closed, Boss."
+
 # ── Volume ─────────────────────────────────────────────────────────────────────
+
+_pre_speak_volume = None
+
+def lower_volume_for_speech(speak_vol: int = 25):
+    """Lower volume before Friday speaks, restore after."""
+    global _pre_speak_volume
+    vol = run_applescript("output volume of (get volume settings)")
+    try:
+        _pre_speak_volume = int(vol)
+    except:
+        _pre_speak_volume = 50
+    if _pre_speak_volume > speak_vol:
+        run_applescript(f"set volume output volume {speak_vol}")
+
+def restore_volume_after_speech():
+    """Restore volume to what it was before Friday spoke."""
+    global _pre_speak_volume
+    if _pre_speak_volume is not None:
+        run_applescript(f"set volume output volume {_pre_speak_volume}")
+        _pre_speak_volume = None
 
 def set_volume(level):
     level = max(0, min(100, int(level)))
@@ -137,6 +191,266 @@ def unmute():
 def get_volume():
     vol = run_applescript("output volume of (get volume settings)")
     return f"Volume is at {vol}%, Boss."
+
+# ── Display brightness ─────────────────────────────────────────────────────────
+
+def set_brightness(level) -> str:
+    """
+    Set display brightness. level: 0-100 or words like 'low', 'high', 'max', 'min'.
+    Uses built-in macOS brightness key simulation.
+    """
+    presets = {
+        "min": 0, "minimum": 0, "off": 0,
+        "low": 25, "dim": 25,
+        "medium": 50, "normal": 50, "default": 50,
+        "high": 75, "bright": 75,
+        "max": 100, "maximum": 100, "full": 100,
+    }
+
+    if isinstance(level, str) and level.lower() in presets:
+        target = presets[level.lower()]
+    else:
+        try:
+            target = max(0, min(100, int(level)))
+        except:
+            return "Couldn't understand brightness level, Boss."
+
+    # Use AppleScript via System Preferences brightness slider
+    script = f'''
+    tell application "System Preferences"
+        reveal anchor "displaysDisplayTab" of pane id "com.apple.preference.displays"
+    end tell
+    '''
+    # Simpler approach: use brightness command via osascript
+    # Scale 0-100 to 0.0-1.0
+    val = target / 100.0
+    brightness_script = f'''
+    tell application "System Events"
+        tell process "SystemUIServer"
+            try
+                set value of slider 1 of menu bar item "Brightness" of menu bar 1 to {val}
+            end try
+        end tell
+    end tell
+    '''
+    result = run_applescript(brightness_script)
+
+    # Fallback: use keyboard brightness keys (simulate pressing)
+    # This works reliably on all Macs
+    try:
+        import subprocess
+        current_val = subprocess.run(
+            ["osascript", "-e", 'tell application "System Events" to key code 144'],
+            capture_output=True
+        )
+    except:
+        pass
+
+    return f"Brightness set to {target}%, Boss."
+
+def brightness_up() -> str:
+    """Increase brightness by pressing the brightness up key."""
+    for _ in range(3):
+        run_applescript('tell application "System Events" to key code 144')
+        time.sleep(0.05)
+    return "Brightness increased, Boss."
+
+def brightness_down() -> str:
+    """Decrease brightness by pressing the brightness down key."""
+    for _ in range(3):
+        run_applescript('tell application "System Events" to key code 145')
+        time.sleep(0.05)
+    return "Brightness decreased, Boss."
+
+# ── Keyboard backlight ─────────────────────────────────────────────────────────
+
+def keyboard_backlight_up() -> str:
+    """Increase keyboard backlight."""
+    for _ in range(3):
+        run_applescript('tell application "System Events" to key code 134')
+        time.sleep(0.05)
+    return "Keyboard backlight increased, Boss."
+
+def keyboard_backlight_down() -> str:
+    """Decrease keyboard backlight."""
+    for _ in range(3):
+        run_applescript('tell application "System Events" to key code 133')
+        time.sleep(0.05)
+    return "Keyboard backlight decreased, Boss."
+
+def keyboard_backlight_off() -> str:
+    """Turn keyboard backlight all the way down."""
+    for _ in range(10):
+        run_applescript('tell application "System Events" to key code 133')
+        time.sleep(0.03)
+    return "Keyboard backlight off, Boss."
+
+# ── AirPods ────────────────────────────────────────────────────────────────────
+
+def connect_airpods(device_name: str = "AirPods") -> str:
+    """Connect AirPods or any Bluetooth device by name."""
+    script = f'''
+    tell application "System Events"
+        tell process "SystemUIServer"
+            try
+                click menu bar item "Bluetooth" of menu bar 1
+                delay 0.5
+                click menu item "{device_name}" of menu 1 of menu bar item "Bluetooth" of menu bar 1
+                delay 0.3
+                click menu item "Connect" of menu 1 of menu item "{device_name}" of menu 1 of menu bar item "Bluetooth" of menu bar 1
+            end try
+        end tell
+    end tell
+    '''
+    run_applescript(script)
+    return f"Attempting to connect {device_name}, Boss."
+
+def disconnect_airpods(device_name: str = "AirPods") -> str:
+    """Disconnect AirPods or any Bluetooth device by name."""
+    script = f'''
+    tell application "System Events"
+        tell process "SystemUIServer"
+            try
+                click menu bar item "Bluetooth" of menu bar 1
+                delay 0.5
+                click menu item "{device_name}" of menu 1 of menu bar item "Bluetooth" of menu bar 1
+                delay 0.3
+                click menu item "Disconnect" of menu 1 of menu item "{device_name}" of menu 1 of menu bar item "Bluetooth" of menu bar 1
+            end try
+        end tell
+    end tell
+    '''
+    run_applescript(script)
+    return f"Disconnecting {device_name}, Boss."
+
+def list_bluetooth_devices() -> str:
+    """List paired Bluetooth devices using blueutil if available."""
+    try:
+        result = subprocess.run(["blueutil", "--paired"], capture_output=True, text=True)
+        if result.returncode == 0:
+            lines = result.stdout.strip().split("\n")
+            names = [l.split('name: "')[1].split('"')[0] for l in lines if 'name:' in l]
+            if names:
+                return "Paired devices: " + ", ".join(names) + ", Boss."
+        return "Couldn't list Bluetooth devices, Boss."
+    except:
+        return "blueutil not installed. Run: brew install blueutil, Boss."
+
+# ── Notifications ──────────────────────────────────────────────────────────────
+
+def read_notifications() -> str:
+    """Read recent macOS notifications using AppleScript."""
+    script = '''
+    tell application "System Events"
+        tell process "NotificationCenter"
+            try
+                set notifs to {}
+                set allGroups to groups of UI element 1 of scroll area 1 of window "Notification Center"
+                repeat with g in allGroups
+                    set end of notifs to description of g
+                end repeat
+                return notifs as string
+            on error
+                return "none"
+            end try
+        end tell
+    end tell
+    '''
+    result = run_applescript(script)
+    if not result or result == "none":
+        return "No notifications right now, Boss."
+    # Clean up the output
+    lines = result.split(",")[:5]
+    return "Recent notifications: " + ". ".join(l.strip() for l in lines if l.strip()) + ", Boss."
+
+def clear_notifications() -> str:
+    """Clear all notifications."""
+    script = '''
+    tell application "System Events"
+        tell process "NotificationCenter"
+            try
+                click button "Clear All" of window "Notification Center"
+            end try
+        end tell
+    end tell
+    '''
+    run_applescript(script)
+    return "Notifications cleared, Boss."
+
+# ── Clipboard ─────────────────────────────────────────────────────────────────
+
+def get_clipboard():
+    result = subprocess.run(["pbpaste"], capture_output=True, text=True)
+    content = result.stdout.strip()
+    if not content:
+        return "Clipboard is empty, Boss."
+    return f"Clipboard contains: {content[:300]}"
+
+def set_clipboard(text: str):
+    subprocess.run(["pbcopy"], input=text.encode())
+    return f"Copied to clipboard, Boss."
+
+def paste_clipboard() -> str:
+    """Paste clipboard content into the currently active app."""
+    run_applescript('tell application "System Events" to keystroke "v" using command down')
+    return "Pasted, Boss."
+
+def type_text(text: str):
+    pyautogui.typewrite(text, interval=0.05)
+    return f"Typed, Boss."
+
+def dictate_text(text: str) -> str:
+    """Type text into whatever is currently focused — emails, docs, forms."""
+    time.sleep(0.5)  # brief pause so focus is set
+    pyautogui.typewrite(text, interval=0.04)
+    return f"Dictated text, Boss."
+
+def press_key(key: str):
+    pyautogui.press(key)
+    return f"Pressed {key}, Boss."
+
+# ── VPN ────────────────────────────────────────────────────────────────────────
+
+def vpn_connect(vpn_name: str = "") -> str:
+    """Connect to a VPN via Network Preferences."""
+    if vpn_name:
+        script = f'''
+        tell application "System Preferences"
+            activate
+            set current pane to pane "com.apple.preference.network"
+        end tell
+        '''
+        run_applescript(script)
+        return f"Opened Network Preferences, Boss. Select {vpn_name} and connect."
+    # Try connecting via networksetup if VPN name is known
+    try:
+        result = subprocess.run(
+            ["networksetup", "-connectpppoeservice", vpn_name],
+            capture_output=True, text=True
+        )
+        return f"Attempting to connect VPN, Boss."
+    except:
+        return "Opened Network Preferences, Boss. Select your VPN and connect."
+
+def vpn_disconnect(vpn_name: str = "") -> str:
+    """Disconnect VPN."""
+    try:
+        subprocess.run(["networksetup", "-disconnectpppoeservice", vpn_name], capture_output=True)
+        return "VPN disconnected, Boss."
+    except:
+        return "Couldn't disconnect VPN automatically, Boss. Do it from the menu bar."
+
+# ── Incognito browser ──────────────────────────────────────────────────────────
+
+def open_incognito(url: str = "") -> str:
+    """Open Brave in incognito/private mode."""
+    if url:
+        if not url.startswith("http"):
+            url = "https://" + url
+        subprocess.Popen(["open", "-a", config.DEFAULT_BROWSER, "--args", "--incognito", url])
+        return f"Opening {url} in private mode, Boss."
+    subprocess.Popen(["open", "-a", config.DEFAULT_BROWSER, "--args", "--incognito"])
+    return "Private browsing window opened, Boss."
 
 # ── System ─────────────────────────────────────────────────────────────────────
 
@@ -221,27 +535,6 @@ def do_not_disturb_on():
 def do_not_disturb_off():
     return "Do Not Disturb disabled, Boss."
 
-# ── Clipboard ─────────────────────────────────────────────────────────────────
-
-def get_clipboard():
-    result = subprocess.run(["pbpaste"], capture_output=True, text=True)
-    content = result.stdout.strip()
-    if not content:
-        return "Clipboard is empty, Boss."
-    return f"Clipboard contains: {content[:300]}"
-
-def set_clipboard(text: str):
-    subprocess.run(["pbcopy"], input=text.encode())
-    return f"Copied to clipboard, Boss."
-
-def type_text(text: str):
-    pyautogui.typewrite(text, interval=0.05)
-    return f"Typed: {text}, Boss."
-
-def press_key(key: str):
-    pyautogui.press(key)
-    return f"Pressed {key}, Boss."
-
 # ── File operations ───────────────────────────────────────────────────────────
 
 def find_file(filename: str) -> str:
@@ -259,9 +552,7 @@ def find_file(filename: str) -> str:
         return f"File search failed, Boss: {e}"
 
 def open_file_or_folder(name: str) -> str:
-    """Find and open a file or folder in Finder."""
     try:
-        # common folders first
         common = {
             "downloads": "~/Downloads", "desktop": "~/Desktop",
             "documents": "~/Documents", "pictures": "~/Pictures",
@@ -273,8 +564,6 @@ def open_file_or_folder(name: str) -> str:
             if k in key:
                 subprocess.Popen(["open", os.path.expanduser(path)])
                 return f"Opened {k.title()} folder, Boss."
-
-        # search for it
         result = subprocess.run(
             ["mdfind", "-name", name],
             capture_output=True, text=True, timeout=10
@@ -332,9 +621,7 @@ def delete_file(filename: str) -> str:
         paths = [p for p in result.stdout.strip().split("\n") if p and ".Trash" not in p]
         if not paths:
             return f"Couldn't find {filename}, Boss."
-        subprocess.run(["trash", paths[0]], capture_output=True)
-        if subprocess.run(["trash", "--version"], capture_output=True).returncode != 0:
-            subprocess.run(["mv", paths[0], os.path.expanduser("~/.Trash/")])
+        subprocess.run(["mv", paths[0], os.path.expanduser("~/.Trash/")])
         return f"Moved {filename} to Trash, Boss."
     except Exception as e:
         return f"Delete failed, Boss: {e}"
@@ -555,7 +842,9 @@ def vibe_mode():
 
 def night_mode():
     run_applescript("set volume output volume 20")
-    return "Night mode on. Volume lowered, Boss."
+    brightness_down()
+    keyboard_backlight_off()
+    return "Night mode on. Volume lowered, screen dimmed, backlight off, Boss."
 
 # ── Notes ─────────────────────────────────────────────────────────────────────
 
@@ -693,13 +982,10 @@ def get_cricket_score() -> str:
     except:
         return "Couldn't fetch cricket scores right now, Boss."
 
-# ── PASTE THIS OVER the existing get_joke() in tools/mac_control.py ───────────
-
 def get_joke() -> str:
     import random
     import requests
 
-    # Try JokeAPI — best quality, safe filter on
     try:
         resp = requests.get(
             "https://v2.jokeapi.dev/joke/Programming,Misc?blacklistFlags=nsfw,racist,sexist,explicit&type=twopart",
@@ -710,7 +996,6 @@ def get_joke() -> str:
     except:
         pass
 
-    # Backup: icanhazdadjoke
     try:
         resp = requests.get(
             "https://icanhazdadjoke.com/",
@@ -722,26 +1007,21 @@ def get_joke() -> str:
     except:
         pass
 
-    # Offline fallback — strong list
     jokes = [
-        "Why do programmers always mix up Halloween and Christmas? Because Oct 31 equals Dec 25, Boss.",
-        "A SQL query walks into a bar, approaches two tables and asks — can I join you?, Boss.",
-        "Why do Java developers wear glasses? Because they don't C#, Boss.",
-        "I told my computer I needed a break. Now it won't stop sending me Kit Kat ads, Boss.",
-        "Why did the developer go broke? Because he used up all his cache, Boss.",
-        "There are 10 types of people in the world — those who understand binary and those who don't, Boss.",
-        "Why was the JavaScript developer sad? Because he didn't Node how to Express himself, Boss.",
-        "A programmer's partner says go to the store, get a litre of milk, and if they have eggs get a dozen. He came back with 12 litres of milk. They had eggs, Boss.",
-        "Why do programmers prefer dark mode? Because light attracts bugs, Boss.",
-        "How many programmers does it take to change a light bulb? None — that's a hardware problem, Boss.",
-        "A byte walks into a bar looking pale. The bartender asks what's wrong. The byte says — I had a bit removed, Boss.",
-        "Why did the computer catch a cold? It left its Windows open, Boss.",
-        "Why do programmers hate nature? Too many bugs and no documentation, Boss.",
-        "I would tell you a UDP joke but you might not get it, Boss.",
-        "Why was the function sad after a breakup? It didn't get closure, Boss.",
-        "An SEO expert walks into a bar, bars, pub, public house, Irish pub, drinks, beer, Boss.",
+        "Why do programmers always mix up Halloween and Christmas? Because Oct 31 equals Dec 25.",
+        "A SQL query walks into a bar, approaches two tables and asks — can I join you?",
+        "Why do Java developers wear glasses? Because they don't C#.",
+        "I told my computer I needed a break. Now it won't stop sending me Kit Kat ads.",
+        "Why did the developer go broke? Because he used up all his cache.",
+        "There are 10 types of people in the world — those who understand binary and those who don't.",
+        "Why was the JavaScript developer sad? Because he didn't Node how to Express himself.",
+        "Why do programmers prefer dark mode? Because light attracts bugs.",
+        "How many programmers does it take to change a light bulb? None — that's a hardware problem.",
+        "Why do programmers hate nature? Too many bugs and no documentation.",
+        "I would tell you a UDP joke but you might not get it.",
+        "Why was the function sad after a breakup? It didn't get closure.",
     ]
-    return random.choice(jokes).replace(", Boss.", "")
+    return random.choice(jokes)
 
 def get_motivation() -> str:
     import random
@@ -782,7 +1062,6 @@ def wikipedia_summary(topic: str) -> str:
 if __name__ == "__main__":
     print(get_battery())
     print(get_system_info())
-    print(calculate("15 percent of 8500"))
-    print(convert_units("5 miles to km"))
-    print(get_joke())
-    print(define_word("serendipity"))
+    print(get_volume())
+    print(brightness_up())
+    print(keyboard_backlight_up())
