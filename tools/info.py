@@ -3,13 +3,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import requests
 import re
+import subprocess
+
+# Disable SSL warnings
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Wikipedia ──────────────────────────────────────────────────────────────────
 
 def wikipedia_summary(topic: str) -> str:
     try:
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{topic.replace(' ', '_')}"
-        resp = requests.get(url, timeout=5).json()
+        resp = requests.get(url, timeout=5, verify=False, headers={"User-Agent": "FridayAI/1.0"}).json()
         extract = resp.get("extract", "")
         if extract:
             return extract[:400] + "..., Boss."
@@ -32,7 +37,7 @@ CURRENCY_ALIASES = {
     "baht": "THB", "thb": "THB",
     "won": "KRW", "krw": "KRW",
     "ruble": "RUB", "rub": "RUB",
-    "lira": "TRY", "try": "TRY",
+    "lira": "TRY",
     "canadian dollar": "CAD", "cad": "CAD",
     "australian dollar": "AUD", "aud": "AUD",
     "singapore dollar": "SGD", "sgd": "SGD",
@@ -110,15 +115,9 @@ def convert_units(expression: str) -> str:
 # ── Flight status ──────────────────────────────────────────────────────────────
 
 def get_flight_status(flight_number: str) -> str:
-    """Look up flight status — opens FlightAware for live data."""
     flight = flight_number.upper().replace(" ", "")
-    try:
-        # Open FlightAware for live tracking
-        import subprocess
-        subprocess.Popen(["open", f"https://flightaware.com/live/flight/{flight}"])
-        return f"Opened FlightAware for flight {flight}, Boss."
-    except Exception as e:
-        return f"Couldn't look up flight {flight}, Boss: {e}"
+    subprocess.Popen(["open", f"https://flightaware.com/live/flight/{flight}"])
+    return f"Opened FlightAware for flight {flight}, Boss."
 
 def track_flight(flight_number: str) -> str:
     return get_flight_status(flight_number)
@@ -126,70 +125,46 @@ def track_flight(flight_number: str) -> str:
 # ── Package tracking ───────────────────────────────────────────────────────────
 
 def track_package(tracking_number: str) -> str:
-    """Open package tracking — detects courier from tracking number format."""
-    import subprocess
     tn = tracking_number.strip().upper()
-
-    # Detect courier from tracking number format
     if re.match(r'^1Z[A-Z0-9]{16}$', tn):
         url = f"https://www.ups.com/track?tracknum={tn}"
         courier = "UPS"
     elif re.match(r'^\d{12,22}$', tn):
         url = f"https://www.fedex.com/fedextrack/?trknbr={tn}"
         courier = "FedEx"
-    elif re.match(r'^(94|93|92|94|95)\d{20}$', tn):
+    elif re.match(r'^(94|93|92|95)\d{20}$', tn):
         url = f"https://tools.usps.com/go/TrackConfirmAction?tLabels={tn}"
         courier = "USPS"
     elif re.match(r'^[A-Z]{2}\d{9}[A-Z]{2}$', tn):
-        url = f"https://www.indiapost.gov.in/_layouts/15/DOP.Portal.Tracking/TrackConsignment.aspx"
+        url = "https://www.indiapost.gov.in/_layouts/15/DOP.Portal.Tracking/TrackConsignment.aspx"
         courier = "India Post"
     else:
-        # Generic — try 17track
         url = f"https://www.17track.net/en/track#nums={tn}"
         courier = "auto-detect"
-
     subprocess.Popen(["open", url])
     return f"Opened {courier} tracking for {tn}, Boss."
 
 # ── Sports scores ──────────────────────────────────────────────────────────────
 
 def get_cricket_score() -> str:
-    try:
-        resp = requests.get(
-            "https://cricbuzz-cricket.p.rapidapi.com/matches/v1/live",
-            headers={"X-RapidAPI-Host": "cricbuzz-cricket.p.rapidapi.com"},
-            timeout=5
-        )
-        # Free fallback — open Cricbuzz
-        import subprocess
-        subprocess.Popen(["open", "https://www.cricbuzz.com/cricket-match/live-scores"])
-        return "Opened live cricket scores on Cricbuzz, Boss."
-    except:
-        import subprocess
-        subprocess.Popen(["open", "https://www.cricbuzz.com/cricket-match/live-scores"])
-        return "Opened Cricbuzz for live scores, Boss."
+    subprocess.Popen(["open", "https://www.cricbuzz.com/cricket-match/live-scores"])
+    return "Opened live cricket scores on Cricbuzz, Boss."
 
 def get_ipl_score() -> str:
-    import subprocess
     subprocess.Popen(["open", "https://www.cricbuzz.com/cricket-series/7607/indian-premier-league-2025/matches"])
     return "Opened IPL 2025 scores, Boss."
 
 def get_football_score(team: str = "") -> str:
-    import subprocess
-    if team:
-        subprocess.Popen(["open", f"https://www.bbc.com/sport/football/scores-fixtures"])
-    else:
-        subprocess.Popen(["open", "https://www.bbc.com/sport/football/scores-fixtures"])
+    subprocess.Popen(["open", "https://www.bbc.com/sport/football/scores-fixtures"])
     return "Opened football scores, Boss."
 
 def get_f1_standings() -> str:
-    import subprocess
     subprocess.Popen(["open", "https://www.formula1.com/en/results/standings/drivers"])
     return "Opened F1 driver standings, Boss."
 
 def get_f1_next_race() -> str:
     try:
-        resp = requests.get("https://ergast.com/api/f1/current/next.json", timeout=5).json()
+        resp = requests.get("https://api.jolpi.ca/ergast/f1/current/next.json", timeout=5).json()
         race = resp["MRData"]["RaceTable"]["Races"][0]
         name = race["raceName"]
         date = race["date"]
@@ -197,7 +172,6 @@ def get_f1_next_race() -> str:
         country = race["Circuit"]["Location"]["country"]
         return f"Next F1 race: {name} at {circuit}, {country} on {date}, Boss."
     except:
-        import subprocess
         subprocess.Popen(["open", "https://www.formula1.com/en/racing/2025.html"])
         return "Opened F1 2025 calendar, Boss."
 
@@ -216,9 +190,8 @@ def get_sports_score(sport: str = "") -> str:
 
 def get_movie_info(title: str) -> str:
     try:
-        # Use OMDB API (free tier — no key needed for basic info)
         resp = requests.get(
-            f"http://www.omdbapi.com/",
+            "http://www.omdbapi.com/",
             params={"t": title, "apikey": "trilogy"},
             timeout=5
         ).json()
@@ -226,41 +199,34 @@ def get_movie_info(title: str) -> str:
             return (f"{resp['Title']} ({resp['Year']}) — {resp['Genre']}. "
                     f"Rating: {resp.get('imdbRating', 'N/A')}/10. "
                     f"{resp.get('Plot', '')[:150]}, Boss.")
-        # Fallback to IMDB search
-        import subprocess
         query = title.replace(" ", "+")
         subprocess.Popen(["open", f"https://www.imdb.com/find?q={query}"])
         return f"Opened IMDB search for {title}, Boss."
-    except Exception as e:
-        import subprocess
+    except:
         query = title.replace(" ", "+")
         subprocess.Popen(["open", f"https://www.imdb.com/find?q={query}"])
         return f"Opened IMDB search for {title}, Boss."
 
 def whats_streaming(service: str = "") -> str:
-    import subprocess
     services = {
-        "netflix":    "https://www.netflix.com/browse",
-        "prime":      "https://www.primevideo.com",
-        "hotstar":    "https://www.hotstar.com",
-        "disney":     "https://www.hotstar.com",
-        "apple tv":   "https://tv.apple.com",
-        "youtube":    "https://www.youtube.com/feed/trending",
+        "netflix":  "https://www.netflix.com/browse",
+        "prime":    "https://www.primevideo.com",
+        "hotstar":  "https://www.hotstar.com",
+        "disney":   "https://www.hotstar.com",
+        "apple tv": "https://tv.apple.com",
+        "youtube":  "https://www.youtube.com/feed/trending",
     }
-    key = service.lower().strip()
-    url = services.get(key, "https://www.justwatch.com/in")
+    url = services.get(service.lower().strip(), "https://www.justwatch.com/in")
     subprocess.Popen(["open", url])
-    label = service if service else "JustWatch"
-    return f"Opened {label}, Boss."
+    return f"Opened {service if service else 'JustWatch'}, Boss."
 
 # ── Recipes ────────────────────────────────────────────────────────────────────
 
 def get_recipe(dish: str) -> str:
     try:
         resp = requests.get(
-            f"https://www.themealdb.com/api/json/v1/1/search.php",
-            params={"s": dish},
-            timeout=5
+            "https://www.themealdb.com/api/json/v1/1/search.php",
+            params={"s": dish}, timeout=5
         ).json()
         meals = resp.get("meals")
         if meals:
@@ -296,12 +262,12 @@ def define_word(word: str) -> str:
             timeout=5
         ).json()
         if isinstance(resp, list):
-            entry    = resp[0]
-            meaning  = entry["meanings"][0]
-            part     = meaning["partOfSpeech"]
-            defn     = meaning["definitions"][0]["definition"]
-            example  = meaning["definitions"][0].get("example", "")
-            result   = f"{word} ({part}): {defn}"
+            entry   = resp[0]
+            meaning = entry["meanings"][0]
+            part    = meaning["partOfSpeech"]
+            defn    = meaning["definitions"][0]["definition"]
+            example = meaning["definitions"][0].get("example", "")
+            result  = f"{word} ({part}): {defn}"
             if example:
                 result += f". Example: {example}"
             return result + ", Boss."
@@ -318,6 +284,9 @@ def get_synonyms(word: str) -> str:
         if isinstance(resp, list):
             synonyms = []
             for meaning in resp[0]["meanings"]:
+                # Check at meaning level
+                synonyms.extend(meaning.get("synonyms", []))
+                # Check at definition level
                 for defn in meaning["definitions"]:
                     synonyms.extend(defn.get("synonyms", []))
             synonyms = list(set(synonyms))[:8]
@@ -336,6 +305,7 @@ def get_antonyms(word: str) -> str:
         if isinstance(resp, list):
             antonyms = []
             for meaning in resp[0]["meanings"]:
+                antonyms.extend(meaning.get("antonyms", []))
                 for defn in meaning["definitions"]:
                     antonyms.extend(defn.get("antonyms", []))
             antonyms = list(set(antonyms))[:8]
@@ -371,14 +341,20 @@ def translate_text(text: str, target_lang: str = "hindi") -> str:
     try:
         lang_code = LANG_CODES.get(target_lang.lower(), target_lang.lower())
         resp = requests.get(
-            "https://api.mymemory.translated.net/get",
-            params={"q": text, "langpair": f"en|{lang_code}"},
+            "https://translate.googleapis.com/translate_a/single",
+            params={
+                "client": "gtx",
+                "sl": "en",
+                "tl": lang_code,
+                "dt": "t",
+                "q": text
+            },
             timeout=5
         ).json()
-        translated = resp.get("responseData", {}).get("translatedText", "")
-        if translated and translated.lower() != text.lower():
+        translated = resp[0][0][0]
+        if translated:
             return f"'{text}' in {target_lang}: {translated}, Boss."
-        return f"Translation unavailable right now, Boss."
+        return "Translation unavailable right now, Boss."
     except Exception as e:
         return f"Translation failed, Boss: {e}"
 
@@ -389,7 +365,7 @@ def detect_language(text: str) -> str:
             params={"q": text, "langpair": "en|hi"},
             timeout=5
         ).json()
-        return f"Language detection done. Response: {resp.get('responseStatus', 'unknown')}, Boss."
+        return f"Language detection done, Boss."
     except Exception as e:
         return f"Language detection failed, Boss: {e}"
 
