@@ -64,7 +64,6 @@ from tools.alerts import (
 from tools.clipboard import (
     get_clipboard as clip_get,
     summarise_clipboard as clip_summarise,
-    fix_grammar_clipboard,
     set_clipboard as clip_set,
     paste_clipboard as clip_paste,
     copy_selection, dictate_text,
@@ -311,7 +310,7 @@ Available tools:
 
 Rules:
 - If no tool fits, use "chat"
-- For translate_text: param = "text|language"
+- For translate_text: if user says "translate my clipboard" or "translate this", param = "|language" (empty text, just the language). Otherwise param = "text to translate|language"
 - For create_event: param = "title|date|time"
 - For set_reminder: param = "duration|label"
 - For set_repeating_alert: param = "label|interval_mins"
@@ -358,7 +357,8 @@ def execute_tool(tool: str, param: str) -> str | None:
     # Music
     if t == "play_song":
         if not p:
-            return "What would you like me to play, Boss?"
+            # Return directly — no param means we need to ask
+            return "SPEAK_DIRECT:What would you like me to play, Boss?"
         return play_song(p)
     if t == "play_playlist":           return play_playlist(p)
     if t == "play_artist":             return play_artist(p)
@@ -542,6 +542,20 @@ def execute_tool(tool: str, param: str) -> str | None:
         parts = p.split("|")
         text = parts[0].strip()
         lang = parts[1].strip() if len(parts) > 1 else "hindi"
+        # Read clipboard if no real text content provided
+        clipboard_trigger = (
+            not text
+            or text.lower() in ("text", "clipboard", "it", "this")
+            or "clipboard" in text.lower()
+            or "translate my" in text.lower()
+            or "translate the" in text.lower()
+            or len(text.split()) > 5  # classifier leaked the raw sentence
+        )
+        if clipboard_trigger:
+            import subprocess as _sp
+            text = _sp.run(["pbpaste"], capture_output=True, text=True).stdout.strip()
+            if not text:
+                return "Clipboard is empty, Boss. Nothing to translate."
         return info_translate(text, lang)
     if t == "get_flight_status":       return get_flight_status(p)
     if t == "track_package":           return track_package(p)
@@ -669,13 +683,17 @@ def process(user_input: str) -> str:
     else:
         tool_result = execute_tool(tool, param)
         if tool_result:
-            ai_result = handle_ai_tool(tool_result, user_input)
-            if ai_result:
-                result = ai_result
-            elif tool.lower() in SPEAK_DIRECTLY:
-                result = tool_result
+            # Direct speak override — bypass Ollama entirely
+            if tool_result.startswith("SPEAK_DIRECT:"):
+                result = tool_result.replace("SPEAK_DIRECT:", "")
             else:
-                result = ask_ollama(user_input, tool_result)
+                ai_result = handle_ai_tool(tool_result, user_input)
+                if ai_result:
+                    result = ai_result
+                elif tool.lower() in SPEAK_DIRECTLY:
+                    result = tool_result
+                else:
+                    result = ask_ollama(user_input, tool_result)
         else:
             result = ask_ollama(user_input)
 
