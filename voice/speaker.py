@@ -3,33 +3,34 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import subprocess
 import random
+import time
 from config import SAY_VOICE
 
 _current_process = None
 _last_wake = None
 
 WAKE_RESPONSES = [
-    "Yes Sir, how may I assist you?",
-    "At your service, Sir.",
-    "Good to hear from you, Sir. What do you need?",
-    "Online and ready, Sir.",
-    "How can I help you, Sir?",
-    "Always here, Sir. What do you need?",
-    "Awaiting your orders, Sir.",
-    "Right here, Sir. Go ahead.",
-    "Standing by, Sir. What is it?",
-    "Ready when you are, Sir.",
+    "Yes Boss, how may I assist you?",
+    "At your service.",
+    "Go ahead, Boss.",
+    "Online and ready.",
+    "How can I help?",
+    "Always here. What do you need?",
+    "Awaiting your orders, Boss.",
+    "Right here. Go ahead.",
+    "Standing by. What is it?",
+    "Ready when you are, Boss.",
 ]
 
 SHUTDOWN_RESPONSES = [
-    "Shutting down. Goodbye, Sir. See you soon.",
-    "Going offline, Sir. Do try not to break anything while I'm gone.",
-    "Signing off, Sir. It's been a pleasure.",
-    "Powering down. Take care, Sir.",
-    "Going offline now, Sir. Until next time.",
-    "Shutting down systems. Farewell, Sir.",
-    "Going dark, Sir. Don't hesitate to call.",
-    "Systems offline. Rest well, Sir.",
+    "Shutting down. Goodbye, Boss.",
+    "Going offline. Do try not to break anything while I'm gone.",
+    "Signing off. It's been a pleasure, Boss.",
+    "Powering down. Take care.",
+    "Going offline now. Until next time, Boss.",
+    "Shutting down systems. Farewell.",
+    "Going dark, Boss. Don't hesitate to call.",
+    "Systems offline. Rest well.",
 ]
 
 def stop_speaking():
@@ -43,13 +44,16 @@ def speak(text: str):
     """Speak text out loud using macOS say command."""
     global _current_process
     stop_speaking()
+    # [[slnc 1000]] adds 1 second silence at end to prevent cutoff
     _current_process = subprocess.Popen(
-        ["say", "-v", SAY_VOICE, text.strip() + " [[slnc 500]]"]
+        ["say", "-v", SAY_VOICE, text.strip() + " [[slnc 1000]]"]
     )
     _current_process.wait()
+    # Extra buffer after speech finishes
+    time.sleep(0.3)
 
 def wake_response():
-    """Friday greets Sir after being woken up."""
+    """Friday greets Boss after being woken up."""
     global _last_wake
     choices = [w for w in WAKE_RESPONSES if w != _last_wake]
     phrase = random.choice(choices)
@@ -64,7 +68,6 @@ def shutdown_response():
     return phrase
 
 if __name__ == "__main__":
-    speak("Friday online, Sir. All systems are operational and standing by.")
-    import time
+    speak("Friday online, Boss. All systems are operational and standing by.")
     time.sleep(2)
     wake_response()

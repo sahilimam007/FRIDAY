@@ -15,7 +15,7 @@ OLLAMA_URL      = "http://localhost:11434"
 LLM_TIMEOUT     = 60
 
 # ── Whisper STT ───────────────────────────────────────────────────────────────
-WHISPER_MODEL   = "small"
+WHISPER_MODEL   = "medium"
 WHISPER_LANG    = "en"
 WHISPER_DEVICE  = "auto"
 

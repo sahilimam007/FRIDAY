@@ -185,10 +185,11 @@ def listen() -> tuple:
         stream.close()
         pa.terminate()
 
-    # Give audio device a moment to breathe
-    time.sleep(1.0)
+   # Give audio device time to fully release
+    time.sleep(2.0)
     wake_response()
-
+    # Wait for wake response to finish completely
+    time.sleep(0.5)
     # Record the actual command
     audio_path = record_until_silence()
     text, lang = transcribe(audio_path)

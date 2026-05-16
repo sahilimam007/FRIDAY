@@ -3,20 +3,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sqlite3
 import json
+import re
 import chromadb
-from datetime import datetime
-from config import BASE_DIR
+from datetime import datetime, timedelta
+from config import BASE_DIR, OLLAMA_MODEL
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 MEMORY_DIR   = os.path.join(BASE_DIR, "memory")
 DB_PATH      = os.path.join(MEMORY_DIR, "friday.db")
 CHROMA_PATH  = os.path.join(MEMORY_DIR, "chroma_store")
 
-# ── ChromaDB client (long-term semantic memory) ────────────────────────────────
+# ── ChromaDB client ────────────────────────────────────────────────────────────
 chroma_client    = chromadb.PersistentClient(path=CHROMA_PATH)
 long_term_memory = chroma_client.get_or_create_collection(name="friday_memory")
 
-# ── SQLite setup (short-term conversation history) ────────────────────────────
+# ── SQLite setup ───────────────────────────────────────────────────────────────
 def _get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
@@ -32,11 +33,57 @@ def _get_conn():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SHORT-TERM MEMORY  (SQLite — last N conversation turns)
+# DATE RESOLVER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def resolve_dates(fact: str) -> str:
+    today = datetime.now()
+    text  = fact.lower()
+
+    if "today" in text:
+        fact = re.sub(r'\btoday\b', today.strftime("%A %d %B %Y"), fact, flags=re.IGNORECASE)
+
+    if "tomorrow" in text:
+        tomorrow = today + timedelta(days=1)
+        fact = re.sub(r'\btomorrow\b', tomorrow.strftime("%A %d %B %Y"), fact, flags=re.IGNORECASE)
+
+    if "day after tomorrow" in text:
+        dat = today + timedelta(days=2)
+        fact = re.sub(r'\bday after tomorrow\b', dat.strftime("%A %d %B %Y"), fact, flags=re.IGNORECASE)
+
+    days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
+    for i, day in enumerate(days):
+        if f"next {day}" in text:
+            days_ahead = (i - today.weekday() + 7) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            target = today + timedelta(days=days_ahead)
+            fact = re.sub(
+                rf'\bnext {day}\b',
+                target.strftime("%A %d %B %Y"),
+                fact, flags=re.IGNORECASE
+            )
+
+    for i, day in enumerate(days):
+        if f"this {day}" in text:
+            days_ahead = (i - today.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            target = today + timedelta(days=days_ahead)
+            fact = re.sub(
+                rf'\bthis {day}\b',
+                target.strftime("%A %d %B %Y"),
+                fact, flags=re.IGNORECASE
+            )
+
+    return fact
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SHORT-TERM MEMORY  (SQLite)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_message(role: str, content: str):
-    """Save a single conversation turn."""
     conn = _get_conn()
     conn.execute(
         "INSERT INTO conversations (role, content, timestamp) VALUES (?, ?, ?)",
@@ -47,7 +94,6 @@ def save_message(role: str, content: str):
 
 
 def get_recent_history(limit: int = 10) -> list[dict]:
-    """Return the last N conversation turns."""
     conn = _get_conn()
     rows = conn.execute(
         "SELECT role, content FROM conversations ORDER BY id DESC LIMIT ?",
@@ -58,7 +104,6 @@ def get_recent_history(limit: int = 10) -> list[dict]:
 
 
 def clear_history():
-    """Wipe the short-term conversation history."""
     conn = _get_conn()
     conn.execute("DELETE FROM conversations")
     conn.commit()
@@ -67,18 +112,19 @@ def clear_history():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# LONG-TERM MEMORY  (ChromaDB — semantic facts & notes)
+# LONG-TERM MEMORY  (ChromaDB)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def remember(fact: str, tags: list[str] | None = None):
-    """Store a fact in long-term memory."""
+    resolved = resolve_dates(fact)
     doc_id   = f"mem_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
     metadata = {
         "timestamp": datetime.now().isoformat(),
-        "tags": json.dumps(tags or [])
+        "saved_on":  datetime.now().strftime("%A %d %B %Y"),
+        "tags":      json.dumps(tags or [])
     }
     long_term_memory.add(
-        documents=[fact],
+        documents=[resolved],
         metadatas=[metadata],
         ids=[doc_id]
     )
@@ -86,7 +132,6 @@ def remember(fact: str, tags: list[str] | None = None):
 
 
 def recall(query: str, top_k: int = 3) -> str:
-    """Retrieve relevant facts from long-term memory."""
     count = long_term_memory.count()
     if count == 0:
         return ""
@@ -94,14 +139,20 @@ def recall(query: str, top_k: int = 3) -> str:
         query_texts=[query],
         n_results=min(top_k, count)
     )
-    docs = results.get("documents", [[]])[0]
+    docs      = results.get("documents", [[]])[0]
+    metadatas = results.get("metadatas", [[]])[0]
     if not docs:
         return ""
-    return "Relevant memory:\n" + "\n".join(f"- {d}" for d in docs)
+
+    lines = []
+    for doc, meta in zip(docs, metadatas):
+        saved_on = meta.get("saved_on", "")
+        lines.append(f"- {doc} (saved: {saved_on})")
+
+    return "Relevant memory:\n" + "\n".join(lines)
 
 
 def forget_all():
-    """Wipe all long-term memories."""
     ids = long_term_memory.get()["ids"]
     if ids:
         long_term_memory.delete(ids=ids)
@@ -109,13 +160,58 @@ def forget_all():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# STARTUP CHECK — events today or tomorrow
+# ══════════════════════════════════════════════════════════════════════════════
+
+def check_upcoming_events() -> str | None:
+    count = long_term_memory.count()
+    if count == 0:
+        return None
+
+    today    = datetime.now()
+    tomorrow = today + timedelta(days=1)
+
+    today_str    = today.strftime("%A %d %B %Y")
+    tomorrow_str = tomorrow.strftime("%A %d %B %Y")
+
+    results_today = long_term_memory.query(
+        query_texts=[f"event on {today_str}"],
+        n_results=min(5, count)
+    )
+    results_tomorrow = long_term_memory.query(
+        query_texts=[f"event on {tomorrow_str}"],
+        n_results=min(5, count)
+    )
+
+    reminders = []
+
+    for doc in results_today.get("documents", [[]])[0]:
+        if today_str in doc:
+            reminders.append(f"Today: {doc}")
+
+    for doc in results_tomorrow.get("documents", [[]])[0]:
+        if tomorrow_str in doc:
+            reminders.append(f"Tomorrow: {doc}")
+
+    if not reminders:
+        return None
+
+    return "Heads up, Boss — " + " | ".join(reminders)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # QUICK TEST
 # ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    save_message("user", "What is the weather today?")
-    save_message("assistant", "It is 31 degrees and humid in Kolkata, Boss.")
-    print("Recent history:", get_recent_history())
-    print(remember("Boss prefers dark mode on all apps", tags=["preference"]))
-    print(remember("Boss is building Friday on a MacBook Pro M1 Pro", tags=["about"]))
-    print(recall("what machine does Boss use"))
+    print("Testing date resolver:")
+    print(resolve_dates("I have a meeting tomorrow"))
+    print(resolve_dates("exam on next monday"))
+
+    print("\nTesting remember + recall:")
+    print(remember("Boss has a meeting tomorrow at 3pm"))
+    print(recall("meeting"))
+
+    print("\nTesting startup check:")
+    print(check_upcoming_events())
+    

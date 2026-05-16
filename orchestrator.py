@@ -17,36 +17,55 @@ from tools.mac_control import (
     set_volume, get_battery, open_app, close_app,
     take_screenshot, sleep_mac, lock_screen,
     play_song, pause_music, resume_music,
-    next_track, previous_track, get_current_track
+    next_track, previous_track, get_current_track,
+    picture_in_picture, minimize_window, hide_app,
+    get_system_info, calculate, get_clipboard, set_clipboard,
+    focus_mode, vibe_mode, night_mode, type_text
 )
+from tools.reminder import set_reminder, list_reminders, cancel_reminders
 from memory.memory import save_message, get_recent_history, remember, recall
 
-# ── Tool definitions (Ollama reads these to decide what to call) ───────────────
+# ── Tool definitions ───────────────────────────────────────────────────────────
 
 TOOLS = [
     {"name": "get_weather",        "description": "Get current weather and temperature"},
-    {"name": "get_news",           "description": "Get latest news headlines. Param: category (world/tech/india/science/business/sports)"},
-    {"name": "search",             "description": "Search the web for any information. Param: query"},
+    {"name": "get_news",           "description": "Get latest news. Param: category (world/tech/india/science/business/sports)"},
+    {"name": "search",             "description": "Search the web. Param: search query"},
     {"name": "play_song",          "description": "Play a song on Apple Music. Param: song name and artist"},
-    {"name": "pause_music",        "description": "Pause the currently playing music"},
-    {"name": "resume_music",       "description": "Resume paused music"},
+    {"name": "pause_music",        "description": "Pause music"},
+    {"name": "resume_music",       "description": "Resume music"},
     {"name": "next_track",         "description": "Skip to next song"},
-    {"name": "previous_track",     "description": "Go back to previous song"},
-    {"name": "get_current_track",  "description": "Get the name of the currently playing song"},
-    {"name": "open_youtube",       "description": "Open and play a video on YouTube. Param: search query"},
-    {"name": "open_maps",          "description": "Open Google Maps for a location. Param: place name"},
-    {"name": "compose_email",      "description": "Open Gmail to compose an email"},
-    {"name": "open_news_tabs",     "description": "Open news websites in browser tabs"},
-    {"name": "open_app",           "description": "Open any Mac application. Param: app name"},
-    {"name": "close_app",          "description": "Close a Mac application. Param: app name"},
-    {"name": "set_volume",         "description": "Set Mac volume. Param: number 0-100"},
-    {"name": "get_battery",        "description": "Check Mac battery level"},
-    {"name": "take_screenshot",    "description": "Take a screenshot of the screen. Triggered by: screenshot, ss, snap, capture, grab screen"},
-    {"name": "sleep_mac",          "description": "Put the Mac to sleep"},
-    {"name": "lock_screen",        "description": "Lock the Mac screen"},
-    {"name": "remember",           "description": "Save a fact to memory. Param: the fact to remember"},
+    {"name": "previous_track",     "description": "Go to previous song"},
+    {"name": "get_current_track",  "description": "What song is playing right now"},
+    {"name": "open_youtube",       "description": "Open and play a YouTube video. Param: search query"},
+    {"name": "open_maps",          "description": "Open Google Maps. Param: place name"},
+    {"name": "compose_email",      "description": "Open Gmail compose window"},
+    {"name": "open_news_tabs",     "description": "Open news websites in browser"},
+    {"name": "open_app",           "description": "Open a Mac app. Param: app name"},
+    {"name": "close_app",          "description": "Close a Mac app. Param: app name"},
+    {"name": "minimize_window",    "description": "Minimize current window. Param: app name (optional)"},
+    {"name": "hide_app",           "description": "Hide an app. Param: app name (optional)"},
+    {"name": "picture_in_picture", "description": "Float video in small window. Triggered by: pip, smaller screen, mini player, float video, picture in picture"},
+    {"name": "set_volume",         "description": "Set volume. Param: number 0-100"},
+    {"name": "get_battery",        "description": "Check battery level"},
+    {"name": "get_system_info",    "description": "Check RAM, CPU, storage usage. Triggered by: system info, how much ram, storage, cpu usage"},
+    {"name": "take_screenshot",    "description": "Take a screenshot. Triggered by: ss, snap, screenshot, capture, grab screen"},
+    {"name": "sleep_mac",          "description": "Put Mac to sleep"},
+    {"name": "lock_screen",        "description": "Lock the screen"},
+    {"name": "calculate",          "description": "Calculate a math expression. Param: the math expression. Triggered by: calculate, what is X plus Y, percentage, multiply"},
+    {"name": "get_clipboard",      "description": "Read what is in the clipboard"},
+    {"name": "set_clipboard",      "description": "Copy something to clipboard. Param: text to copy"},
+    {"name": "type_text",          "description": "Type text at cursor position. Param: text to type"},
+    {"name": "focus_mode",         "description": "Activate focus mode — closes distracting apps, lowers volume"},
+    {"name": "vibe_mode",          "description": "Activate vibe mode — opens music, sets good volume"},
+    {"name": "night_mode",         "description": "Activate night mode — lowers volume and dims screen"},
+    {"name": "set_reminder",       "description": "Set a reminder. Param format: 'TIME|MESSAGE' e.g. '20 minutes|drink water'"},
+    {"name": "list_reminders",     "description": "List all active reminders"},
+    {"name": "cancel_reminders",   "description": "Cancel all active reminders"},
+    {"name": "remember",           "description": "Save something to memory. Param: the fact"},
     {"name": "recall",             "description": "Recall something from memory. Param: what to look up"},
-    {"name": "none",               "description": "No tool needed — just answer conversationally"},
+    {"name": "clear_history",      "description": "Clear conversation history"},
+    {"name": "none",               "description": "No tool needed — answer conversationally"},
 ]
 
 TOOL_LIST_STR = "\n".join(
@@ -54,16 +73,9 @@ TOOL_LIST_STR = "\n".join(
 )
 
 
-# ── Step 1: Ask Ollama which tool to call ─────────────────────────────────────
+# ── Step 1: Classify intent ────────────────────────────────────────────────────
 
 def classify_intent(user_input: str) -> dict:
-    """
-    Ask Ollama to read the user input and return which tool to call
-    and what parameter to pass. Returns a dict like:
-    {"tool": "take_screenshot", "param": ""}
-    {"tool": "play_song", "param": "Blinding Lights"}
-    {"tool": "none", "param": ""}
-    """
     prompt = f"""You are a command classifier for an AI assistant called Friday.
 
 Available tools:
@@ -77,11 +89,15 @@ Reply with ONLY a JSON object like this:
 Rules:
 - Pick the single best tool
 - If no tool fits, use "none"
-- For take_screenshot: any mention of ss, snap, screenshot, capture, grab screen → take_screenshot
-- For play_song: extract just the song/artist name as param
-- For open_youtube: extract just the search query as param
-- For set_volume: extract just the number as param
-- For open_app / close_app: extract just the app name as param
+- For take_screenshot: ss, snap, screenshot, capture, grab screen → take_screenshot
+- For picture_in_picture: smaller screen, pip, float, mini player → picture_in_picture
+- For calculate: any math, percentage, multiplication → calculate
+- For play_song: extract just the song/artist name
+- For open_youtube: extract just the search query
+- For set_volume: extract just the number
+- For open_app / close_app: extract just the app name
+- For get_system_info: ram, memory, storage, cpu, system info → get_system_info
+- For set_reminder: format param as 'TIME|MESSAGE' e.g. '20 minutes|drink water'
 - Return ONLY the JSON, no other text"""
 
     response = ollama.chat(
@@ -90,8 +106,6 @@ Rules:
         options={"temperature": 0}
     )
     raw = response["message"]["content"].strip()
-
-    # Clean up in case Ollama adds markdown
     raw = raw.replace("```json", "").replace("```", "").strip()
 
     try:
@@ -100,7 +114,7 @@ Rules:
         return {"tool": "none", "param": ""}
 
 
-# ── Step 2: Execute the tool ───────────────────────────────────────────────────
+# ── Step 2: Execute tool ───────────────────────────────────────────────────────
 
 def execute_tool(tool: str, param: str) -> str | None:
     if tool == "get_weather":         return get_weather()
@@ -120,13 +134,31 @@ def execute_tool(tool: str, param: str) -> str | None:
     if tool == "open_news_tabs":      return open_news_tabs()
     if tool == "open_app":            return open_app(param.title()) if param else None
     if tool == "close_app":           return close_app(param.title()) if param else None
+    if tool == "minimize_window":     return minimize_window(param)
+    if tool == "hide_app":            return hide_app(param)
+    if tool == "picture_in_picture":  return picture_in_picture()
     if tool == "set_volume":
         try:    return set_volume(int(param))
         except: return set_volume(50)
     if tool == "get_battery":         return get_battery()
+    if tool == "get_system_info":     return get_system_info()
     if tool == "take_screenshot":     return take_screenshot()
     if tool == "sleep_mac":           return sleep_mac()
     if tool == "lock_screen":         return lock_screen()
+    if tool == "calculate":           return calculate(param) if param else None
+    if tool == "get_clipboard":       return get_clipboard()
+    if tool == "set_clipboard":       return set_clipboard(param) if param else None
+    if tool == "type_text":           return type_text(param) if param else None
+    if tool == "focus_mode":          return focus_mode()
+    if tool == "vibe_mode":           return vibe_mode()
+    if tool == "night_mode":          return night_mode()
+    if tool == "set_reminder":
+        if param and "|" in param:
+            time_str, message = param.split("|", 1)
+            return set_reminder(time_str.strip(), message.strip())
+        return "Please specify a time and what to remind you about."
+    if tool == "list_reminders":      return list_reminders()
+    if tool == "cancel_reminders":    return cancel_reminders()
     if tool == "remember":            return remember(param) if param else None
     if tool == "recall":              return recall(param) if param else None
     if tool == "clear_history":
@@ -135,7 +167,7 @@ def execute_tool(tool: str, param: str) -> str | None:
     return None
 
 
-# ── Step 3: Ask Ollama to respond naturally ───────────────────────────────────
+# ── Step 3: Respond naturally ──────────────────────────────────────────────────
 
 def ask_ollama(user_input: str, tool_result: str | None = None) -> str:
     memory_context = recall(user_input)
@@ -145,7 +177,7 @@ def ask_ollama(user_input: str, tool_result: str | None = None) -> str:
     system_prompt = (
         "You are FRIDAY, the personal AI assistant of Sahil. "
         "You are modelled after FRIDAY from the Marvel Cinematic Universe. "
-        "ALWAYS address Sahil as Boss. Never say Sir. Never say his name. "
+        "Usually address Sahil as Boss but sometimes omit it for natural flow. Never say Sir or his name. "
         "Reply in English only. No Hindi. No other language. Ever. "
         "Be direct, tactical, concise — 1 to 2 sentences maximum unless asked for more. "
         "Never offer unsolicited suggestions. "
@@ -168,9 +200,8 @@ def ask_ollama(user_input: str, tool_result: str | None = None) -> str:
             "role": "user",
             "content": (
                 f"SYSTEM RESULT: {tool_result}\n"
-                f"Repeat this result back to Boss in 1 sentence. "
-                f"Do NOT add any extra information. "
-                f"Do NOT mention what was on screen. "
+                f"Repeat this result back in 1 sentence. "
+                f"Do NOT add extra information. "
                 f"Just confirm exactly what the system result says."
             )
         })
@@ -186,17 +217,13 @@ def ask_ollama(user_input: str, tool_result: str | None = None) -> str:
 def process(user_input: str) -> str:
     save_message("user", user_input)
 
-    # Step 1 — classify intent
-    intent     = classify_intent(user_input)
-    tool       = intent.get("tool", "none")
-    param      = intent.get("param", "")
+    intent = classify_intent(user_input)
+    tool   = intent.get("tool", "none")
+    param  = intent.get("param", "")
 
     print(f"[FRIDAY] Intent: {tool} | Param: {param}")
 
-    # Step 2 — execute tool
     tool_result = execute_tool(tool, param) if tool != "none" else None
-
-    # Step 3 — respond naturally
     result = ask_ollama(user_input, tool_result)
 
     save_message("assistant", result)
