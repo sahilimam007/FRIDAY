@@ -79,9 +79,14 @@ def focus_mode():
     return "Focus mode active. Distractions closed, volume down, VS Code open, Boss."
 
 def vibe_mode():
-    subprocess.run(["osascript", "-e", 'tell application "Music" to play'], capture_output=True)
+    subprocess.run(["osascript", "-e", '''
+    tell application "Music"
+        activate
+        play playlist "Vibing"
+    end tell
+    '''], capture_output=True)
     subprocess.run(["osascript", "-e", "set volume output volume 60"], capture_output=True)
-    return "Vibe mode on. Music playing, volume at 60, Boss."
+    return "Vibe mode on. Playing Vibing playlist, volume at 60, Boss."
 
 def night_mode():
     subprocess.run(["osascript", "-e", "set volume output volume 20"], capture_output=True)
