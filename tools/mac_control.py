@@ -53,8 +53,9 @@ def hide_app():
     return "Hidden, Boss."
 
 def show_desktop():
-    run_applescript('tell application "System Events" to key code 103 using {command down}')
-    return "Showing desktop, Boss."
+    subprocess.run(["osascript", "-e",
+        'tell application "Finder" to set collapsed of windows to true'])
+    return "Desktop shown, Boss."
 
 def empty_trash():
     run_applescript('tell application "Finder" to empty trash')
@@ -71,20 +72,28 @@ def shutdown_mac():
 # ── Window control ─────────────────────────────────────────────────────────────
 
 def snap_left():
+    """Switch to left space/desktop."""
     run_applescript('''
     tell application "System Events"
-        keystroke "left" using {control down, option down}
+        key code 123 using {control down}
     end tell
     ''')
-    return "Window snapped left, Boss."
+    return "Switched to left space, Boss."
 
 def snap_right():
+    """Switch to right space/desktop."""
     run_applescript('''
     tell application "System Events"
-        keystroke "right" using {control down, option down}
+        key code 124 using {control down}
     end tell
     ''')
-    return "Window snapped right, Boss."
+    return "Switched to right space, Boss."
+
+# aliases so orchestrator can call either name
+switch_space_left  = snap_left
+switch_space_right = snap_right
+move_left          = snap_left
+move_right         = snap_right
 
 def fullscreen():
     run_applescript('''

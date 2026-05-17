@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#0a0c10;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    min-height:100vh;
+    font-family:-apple-system,sans-serif;
+    overflow:hidden;
+    user-select:none;
+  }
+  #bg { position:absolute; inset:0; }
+  #main { position:relative; display:flex; flex-direction:column; align-items:center; }
+  #state-label {
+    margin-top:16px;
+    font-size:9px;
+    letter-spacing:0.3em;
+    text-transform:uppercase;
+    color:rgba(100,180,255,0.35);
+  }
+
+  /* ── Right output panel ── */
+  #output-panel {
+    position:fixed;
+    right:0; top:0; bottom:0;
+    width:280px;
+    background:rgba(8,11,18,0.97);
+    border-left:1px solid rgba(0,160,255,0.12);
+    padding:32px 20px 24px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    transform:translateX(100%);
+    transition:transform 0.4s cubic-bezier(.4,0,.2,1);
+    pointer-events:none;
+    z-index:10;
+    /* subtle grid inside panel */
+    background-image:
+      linear-gradient(rgba(0,100,180,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,100,180,0.04) 1px, transparent 1px);
+    background-size:30px 30px;
+  }
+  #output-panel.visible { transform:translateX(0); }
+  #output-title {
+    font-size:8px;
+    letter-spacing:0.35em;
+    color:rgba(0,160,255,0.35);
+    text-transform:uppercase;
+    margin-bottom:8px;
+    border-bottom:1px solid rgba(0,160,255,0.08);
+    padding-bottom:8px;
+  }
+  #output-text {
+    font-size:13px;
+    color:rgba(200,235,255,0.85);
+    line-height:1.8;
+    word-break:break-word;
+    flex:1;
+    overflow-y:auto;
+  }
+  #cursor {
+    display:inline-block;
+    width:2px; height:13px;
+    background:rgba(0,180,255,0.8);
+    margin-left:2px;
+    vertical-align:middle;
+    animation:blink 0.8s step-end infinite;
+  }
+  @keyframes blink { 50%{opacity:0;} }
+
+  /* ── Chat bar ── */
+  #chat-bar {
+    position:fixed;
+    bottom:28px;
+    left:50%;
+    transform:translateX(-50%);
+    display:flex;
+    gap:8px;
+    opacity:0;
+    transition:opacity 0.3s;
+    pointer-events:none;
+    z-index:20;
+  }
+  #chat-bar.visible { opacity:1; pointer-events:all; }
+  #chat-input {
+    width:320px;
+    background:rgba(8,14,24,0.96);
+    border:1px solid rgba(0,160,255,0.25);
+    border-radius:6px;
+    color:rgba(200,235,255,0.9);
+    font-size:12px;
+    padding:10px 16px;
+    outline:none;
+    letter-spacing:0.03em;
+    font-family:-apple-system,sans-serif;
+  }
+  #chat-input::placeholder { color:rgba(80,140,200,0.3); }
+  #chat-input:focus { border-color:rgba(0,180,255,0.45); }
+  #chat-send {
+    background:rgba(0,120,255,0.15);
+    border:1px solid rgba(0,160,255,0.3);
+    border-radius:6px;
+    color:rgba(0,190,255,0.85);
+    font-size:10px;
+    letter-spacing:0.18em;
+    padding:10px 18px;
+    cursor:pointer;
+    transition:background 0.2s;
+    font-family:-apple-system,sans-serif;
+  }
+  #chat-send:hover { background:rgba(0,140,255,0.28); }
+
+  /* ── Chat toggle button — bottom left ── */
+  #chat-toggle {
+    position:fixed;
+    bottom:28px;
+    left:28px;
+    font-size:8px;
+    letter-spacing:0.2em;
+    text-transform:uppercase;
+    color:rgba(0,160,255,0.28);
+    cursor:pointer;
+    padding:7px 12px;
+    border:1px solid rgba(0,160,255,0.12);
+    border-radius:4px;
+    transition:color 0.2s, border-color 0.2s;
+    z-index:20;
+  }
+  #chat-toggle:hover { color:rgba(0,190,255,0.65); border-color:rgba(0,180,255,0.28); }
+  #chat-toggle.active { color:rgba(0,210,255,0.75); border-color:rgba(0,190,255,0.35); }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+
+<div id="main">
+  <canvas id="c" width="420" height="420"></canvas>
+  <div id="state-label">Connecting to Friday...</div>
+</div>
+
+<div id="output-panel">
+  <div id="output-title">Friday — Output</div>
+  <div id="output-text"><span id="typed"></span><span id="cursor"></span></div>
+</div>
+
+<div id="chat-bar">
+  <input id="chat-input" placeholder="Type to Friday..." autocomplete="off" />
+  <button id="chat-send">SEND</button>
+</div>
+<div id="chat-toggle" title="Toggle chat input">⌨ Chat</div>
+
+<script>
+// ── Background ─────────────────────────────────────────────────────────────────
+const bgC=document.getElementById('bg'),bgX=bgC.getContext('2d');
+let BW,BH;
+function resizeBG(){BW=bgC.width=window.innerWidth;BH=bgC.height=window.innerHeight;}
+resizeBG();window.addEventListener('resize',()=>{resizeBG();drawBG(0);});
+
+let glowPulse=0;
+let glowColor={r:0,g:160,b:255};
+const GS=40;
+
+function drawBG(pulse){
+  bgX.fillStyle='#0a0c10';bgX.fillRect(0,0,BW,BH);
+  const cx=BW/2,cy=BH/2;
+  const maxDist=Math.sqrt(cx*cx+cy*cy);
+
+  // Dots at grid intersections with wave pulse effect
+  for(let x=0;x<=BW;x+=GS){
+    for(let y=0;y<=BH;y+=GS){
+      const dx=x-cx,dy=y-cy;
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      let dotA=0.15,dotR=1.1;
+      if(pulse>0){
+        const waveFront=pulse*maxDist,waveWidth=maxDist*0.22;
+        const diff=waveFront-dist;
+        if(diff>0&&diff<waveWidth){
+          const intensity=Math.sin((diff/waveWidth)*Math.PI);
+          dotA=0.15+intensity*0.7;dotR=1.1+intensity*2.2;
+        }
+      }
+      bgX.beginPath();bgX.arc(x,y,dotR,0,Math.PI*2);
+      bgX.fillStyle=`rgba(${glowColor.r},${glowColor.g},${glowColor.b},${dotA.toFixed(2)})`;
+      bgX.fill();
+    }
+  }
+
+  // Grid lines
+  bgX.strokeStyle='rgba(60,120,180,0.05)';bgX.lineWidth=0.5;
+  for(let x=0;x<BW;x+=GS){bgX.beginPath();bgX.moveTo(x,0);bgX.lineTo(x,BH);bgX.stroke();}
+  for(let y=0;y<BH;y+=GS){bgX.beginPath();bgX.moveTo(0,y);bgX.lineTo(BW,y);bgX.stroke();}
+
+  // Top centre bracket
+  const cx2=BW/2;
+  bgX.strokeStyle='rgba(100,180,255,0.2)';bgX.lineWidth=1;
+  bgX.beginPath();
+  bgX.moveTo(cx2-60,18);bgX.lineTo(cx2-20,18);bgX.lineTo(cx2-10,7);
+  bgX.lineTo(cx2+10,7);bgX.lineTo(cx2+20,18);bgX.lineTo(cx2+60,18);
+  bgX.stroke();
+
+  // Corner brackets
+  const bLen=28,bOff=16;
+  bgX.strokeStyle='rgba(100,180,255,0.15)';bgX.lineWidth=1;
+  [[bOff,bOff,1,1],[BW-bOff,bOff,-1,1],[bOff,BH-bOff,1,-1],[BW-bOff,BH-bOff,-1,-1]].forEach(([bx,by,sx,sy])=>{
+    bgX.beginPath();bgX.moveTo(bx,by);bgX.lineTo(bx+sx*bLen,by);
+    bgX.moveTo(bx,by);bgX.lineTo(bx,by+sy*bLen);bgX.stroke();
+  });
+}
+drawBG(0);
+
+// ── Orb ────────────────────────────────────────────────────────────────────────
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const OW=420,OH=420,MX=OW/2,MY=OH/2;
+let t=0,state=0;
+
+const STATE_LABELS=[
+  'Standby — say Friday to wake',
+  'Listening...',
+  'Processing...',
+  'Speaking...'
+];
+const STATE_CFG=[
+  {r:0,  g:155,b:255,glow:0.5, ringW:3,  speed:0.4, compassR:0.4},  // idle — blue
+  {r:0,  g:210,b:160,glow:0.9, ringW:4,  speed:1.3, compassR:1.3},  // listening — teal/green
+  {r:255,g:135,b:0,  glow:0.85,ringW:3.5,speed:3.2, compassR:2.6},  // processing — orange
+  {r:0,  g:175,b:255,glow:1.0, ringW:5,  speed:0.9, compassR:0.7},  // speaking — bright blue
+];
+
+const RING_R=110,TICKS=48,WAVE_BARS=32;
+const COMPASS=[0,Math.PI/2,Math.PI,Math.PI*3/2].map(base=>({base,orbitR:RING_R+28,size:3.5,trail:[]}));
+
+const panel=document.getElementById('output-panel');
+const typed=document.getElementById('typed');
+let typeTimer=null;
+
+function typeOut(text){
+  clearInterval(typeTimer);
+  if(!text){
+    panel.classList.remove('visible');
+    typed.textContent='';
+    return;
+  }
+  panel.classList.add('visible');
+  typed.textContent='';
+  let i=0;
+  typeTimer=setInterval(()=>{
+    if(i<text.length){ typed.textContent+=text[i++]; }
+    else clearInterval(typeTimer);
+  },20);
+}
+
+function setState(newState,message){
+  state=newState;
+  document.getElementById('state-label').textContent=STATE_LABELS[state];
+  glowColor={r:STATE_CFG[state].r,g:STATE_CFG[state].g,b:STATE_CFG[state].b};
+  glowPulse=0.001;
+  // Only show panel when processing or speaking and there's a message
+  if((state===2||state===3)&&message){
+    typeOut(message);
+  } else if(state===0){
+    typeOut('');
+  }
+}
+
+// ── Python → JS ────────────────────────────────────────────────────────────────
+const STATE_MAP={'idle':0,'listening':1,'processing':2,'speaking':3};
+window.fridayUpdate=function(data){
+  const idx=STATE_MAP[data.state]??0;
+  setState(idx,data.message||'');
+};
+
+// ── WebChannel ─────────────────────────────────────────────────────────────────
+let bridge=null;
+new QWebChannel(qt.webChannelTransport,function(channel){
+  bridge=channel.objects.bridge;
+  bridge.state_update.connect(function(s,m){ window.fridayUpdate({state:s,message:m}); });
+  bridge.on_ready();
+  setState(0,'');
+});
+
+// ── Chat ────────────────────────────────────────────────────────────────────────
+const chatBar=document.getElementById('chat-bar');
+const chatToggle=document.getElementById('chat-toggle');
+chatToggle.addEventListener('click',()=>{
+  const open=chatBar.classList.toggle('visible');
+  chatToggle.classList.toggle('active',open);
+  if(open) setTimeout(()=>document.getElementById('chat-input').focus(),300);
+});
+
+function sendChat(){
+  const val=document.getElementById('chat-input').value.trim();
+  if(!val||!bridge) return;
+  document.getElementById('chat-input').value='';
+  bridge.on_chat(val);
+}
+document.getElementById('chat-send').addEventListener('click',sendChat);
+document.getElementById('chat-input').addEventListener('keydown',e=>{
+  if(e.key==='Enter') sendChat();
+  if(e.key==='Escape'){ chatBar.classList.remove('visible'); chatToggle.classList.remove('active'); }
+});
+
+// ── Orb render ─────────────────────────────────────────────────────────────────
+function frame(){
+  t+=0.016;
+  if(glowPulse>0){glowPulse+=0.007;if(glowPulse>=1)glowPulse=0;}
+  drawBG(glowPulse);
+  ctx.clearRect(0,0,OW,OH);
+
+  const cfg=STATE_CFG[state];
+  const{r,g,b,glow,ringW,speed,compassR}=cfg;
+  let pulse;
+  if(state===0) pulse=1+0.04*Math.sin(t*0.8);
+  else if(state===1) pulse=1+0.07*Math.sin(t*2.0);
+  else if(state===2) pulse=1+0.05*Math.abs(Math.sin(t*4));
+  else pulse=1+0.09*Math.sin(t*3.5);
+  const curR=RING_R*pulse,glowStr=glow*pulse;
+
+  // Corner brackets on orb
+  const bSize=18,bOff=30;
+  [[MX-bOff-bSize,MY-bOff-bSize,1,1],[MX+bOff+bSize,MY-bOff-bSize,-1,1],
+   [MX-bOff-bSize,MY+bOff+bSize,1,-1],[MX+bOff+bSize,MY+bOff+bSize,-1,-1]].forEach(([bx,by,sx,sy])=>{
+    ctx.strokeStyle=`rgba(${r},${g},${b},0.32)`;ctx.lineWidth=1.4;
+    ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx+sx*bSize,by);
+    ctx.moveTo(bx,by);ctx.lineTo(bx,by+sy*bSize);ctx.stroke();
+  });
+
+  // Outer arc segments
+  const arcR=curR+22,NUM_ARCS=4,segAngle=(Math.PI*2-NUM_ARCS*0.22)/NUM_ARCS;
+  const rotOff=t*speed*0.15;
+  for(let i=0;i<NUM_ARCS;i++){
+    const sa=i*(segAngle+0.22)+rotOff-Math.PI/2;
+    ctx.beginPath();ctx.arc(MX,MY,arcR,sa,sa+segAngle);
+    ctx.strokeStyle=`rgba(${r},${g},${b},0.45)`;ctx.lineWidth=1.4;
+    ctx.shadowColor=`rgba(${r},${g},${b},0.5)`;ctx.shadowBlur=5;ctx.stroke();
+  }
+
+  // Glow ring
+  ctx.save();
+  for(let layer=3;layer>=0;layer--){
+    ctx.beginPath();ctx.arc(MX,MY,curR+layer*4,0,Math.PI*2);
+    ctx.strokeStyle=`rgba(${r},${g},${b},${(glowStr*(0.12-layer*0.025)).toFixed(3)})`;
+    ctx.lineWidth=ringW+layer*3;ctx.shadowBlur=0;ctx.stroke();
+  }
+  ctx.beginPath();ctx.arc(MX,MY,curR,0,Math.PI*2);
+  ctx.strokeStyle=`rgba(${Math.min(255,r+80)},${Math.min(255,g+60)},255,${(0.85*glowStr).toFixed(2)})`;
+  ctx.lineWidth=ringW*0.6;
+  ctx.shadowColor=`rgba(${r},${g},${b},1)`;ctx.shadowBlur=20+10*Math.sin(t);ctx.stroke();
+  ctx.restore();
+
+  // Ticks
+  for(let i=0;i<TICKS;i++){
+    const a=(i/TICKS)*Math.PI*2-Math.PI/2;
+    const isMain=i%12===0,isMid=i%6===0;
+    const tickLen=isMain?10:isMid?6:3,tickOp=isMain?0.55:isMid?0.27:0.12;
+    ctx.beginPath();
+    ctx.moveTo(MX+(curR-tickLen)*Math.cos(a),MY+(curR-tickLen)*Math.sin(a));
+    ctx.lineTo(MX+(curR-1)*Math.cos(a),MY+(curR-1)*Math.sin(a));
+    ctx.strokeStyle=`rgba(${r},${g},${b},${tickOp})`;
+    ctx.lineWidth=isMain?1.4:0.7;ctx.shadowBlur=0;ctx.stroke();
+  }
+
+  // Compass dots
+  ctx.save();
+  for(const c of COMPASS){
+    const angle=c.base+t*speed*0.12*compassR;
+    const cr=c.orbitR*pulse;
+    const dx=MX+cr*Math.cos(angle),dy=MY+cr*Math.sin(angle);
+    c.trail.push({x:dx,y:dy});if(c.trail.length>12)c.trail.shift();
+    for(let ti=0;ti<c.trail.length;ti++){
+      const tp=ti/c.trail.length;
+      ctx.beginPath();ctx.arc(c.trail[ti].x,c.trail[ti].y,c.size*0.5*tp,0,Math.PI*2);
+      ctx.fillStyle=`rgba(${r},${g},${b},${(tp*0.28).toFixed(2)})`;ctx.fill();
+    }
+    ctx.beginPath();ctx.arc(dx,dy,c.size,0,Math.PI*2);
+    ctx.fillStyle=`rgba(${Math.min(255,r+100)},${Math.min(255,g+80)},255,0.95)`;
+    ctx.shadowColor=`rgba(${r},${g},${b},1)`;ctx.shadowBlur=12;ctx.fill();
+    const rx=MX+(curR+2)*Math.cos(angle),ry=MY+(curR+2)*Math.sin(angle);
+    ctx.beginPath();ctx.moveTo(rx,ry);ctx.lineTo(dx,dy);
+    ctx.strokeStyle=`rgba(${r},${g},${b},0.25)`;ctx.lineWidth=0.7;ctx.shadowBlur=0;ctx.stroke();
+  }
+  ctx.restore();
+
+  // Speaking waveform
+  if(state===3){
+    for(let i=0;i<WAVE_BARS;i++){
+      const a=(i/WAVE_BARS)*Math.PI*2-Math.PI/2;
+      const amp=5+Math.sin(i*0.7+t*8)*8+Math.sin(i*0.3+t*5)*4;
+      ctx.beginPath();
+      ctx.moveTo(MX+(curR+2)*Math.cos(a),MY+(curR+2)*Math.sin(a));
+      ctx.lineTo(MX+(curR+2+amp)*Math.cos(a),MY+(curR+2+amp)*Math.sin(a));
+      ctx.strokeStyle=`rgba(0,200,255,${0.45+0.4*(amp/13)})`;
+      ctx.lineWidth=2.2;ctx.shadowColor='rgba(0,200,255,0.75)';ctx.shadowBlur=5;ctx.stroke();
+    }
+  }
+
+  // Processing spinner
+  if(state===2){
+    const spinA=t*speed*0.8;
+    ctx.beginPath();ctx.arc(MX,MY,curR-6,spinA,spinA+Math.PI*1.2);
+    ctx.strokeStyle='rgba(255,155,0,0.82)';ctx.lineWidth=2.8;
+    ctx.shadowColor='rgba(255,140,0,0.9)';ctx.shadowBlur=14;ctx.stroke();
+  }
+
+  // Core
+  const coreG=ctx.createRadialGradient(MX,MY,0,MX,MY,curR-8);
+  coreG.addColorStop(0,'rgba(10,12,16,1)');coreG.addColorStop(1,'rgba(8,10,14,0.95)');
+  ctx.fillStyle=coreG;ctx.shadowBlur=0;
+  ctx.beginPath();ctx.arc(MX,MY,curR-8,0,Math.PI*2);ctx.fill();
+
+  // FRIDAY label
+  ctx.save();
+  ctx.font='500 16px -apple-system,sans-serif';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.shadowColor=`rgba(${r},${g},${b},0.9)`;ctx.shadowBlur=10;
+  ctx.fillStyle=`rgba(220,240,255,${0.75+0.15*Math.sin(t*0.6)})`;
+  ctx.fillText('FRIDAY',MX,MY);
+  ctx.font='400 8.5px -apple-system,sans-serif';
+  ctx.fillStyle=`rgba(${r},${g},${b},${0.32+0.14*Math.sin(t*0.4)})`;
+  ctx.shadowBlur=3;
+  ctx.fillText(STATE_LABELS[state].toUpperCase().split('—')[0].trim(),MX,MY+19);
+  ctx.restore();
+
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>

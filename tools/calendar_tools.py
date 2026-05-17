@@ -2,11 +2,10 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import subprocess
+import re
 from datetime import datetime, timedelta
 
 def run_applescript(script: str) -> str:
-    # Use stdin instead of -e so multi-line scripts with mixed quotes work correctly.
-    # osascript -e silently truncates or misparses multi-line f-strings.
     result = subprocess.run(["osascript"], input=script, capture_output=True, text=True)
     return result.stdout.strip()
 
@@ -16,7 +15,7 @@ def fmt(dt):
 # ── Read calendar events ───────────────────────────────────────────────────────
 
 def get_todays_events() -> str:
-    now = datetime.now()
+    now   = datetime.now()
     start = now.replace(hour=0, minute=0, second=0)
     end   = now.replace(hour=23, minute=59, second=59)
     script = f'''
@@ -82,7 +81,7 @@ def get_tomorrows_events() -> str:
     return f"Tomorrow's events: {result.strip().rstrip(',')}, Boss."
 
 def get_weeks_events() -> str:
-    now  = datetime.now()
+    now   = datetime.now()
     start = now.replace(hour=0, minute=0, second=0)
     end   = (now + timedelta(days=7)).replace(hour=23, minute=59, second=59)
     script = f'''
@@ -115,7 +114,7 @@ def get_weeks_events() -> str:
     return f"This week: {result.strip().rstrip(',')}, Boss."
 
 def get_next_event() -> str:
-    now = datetime.now()
+    now   = datetime.now()
     start = now.replace(second=0)
     end   = (now + timedelta(days=365)).replace(hour=23, minute=59, second=59)
     script = f'''
@@ -153,59 +152,91 @@ def get_next_event() -> str:
         return f"Next event: {first[0]} on {first[1]} at {first[2]}, Boss."
     return f"Next event: {events[0]}, Boss."
 
-# ── Create calendar events ─────────────────────────────────────────────────────
+# ── Create calendar event ──────────────────────────────────────────────────────
+
+def _parse_time(time_str: str):
+    """
+    Parse time string like '3pm', '15:00', '3:30pm', '9am' into (hour, minute).
+    Returns (9, 0) as default if parsing fails.
+    """
+    if not time_str:
+        return 9, 0
+
+    t = time_str.lower().strip()
+
+    # Match patterns like 3pm, 3:30pm, 15:00, 9am
+    match = re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$', t)
+    if not match:
+        return 9, 0
+
+    hour   = int(match.group(1))
+    minute = int(match.group(2)) if match.group(2) else 0
+    period = match.group(3)
+
+    if period == "pm":
+        if hour != 12:
+            hour += 12
+    elif period == "am":
+        if hour == 12:
+            hour = 0
+    # No period — treat as 24hr if > 12, else assume am/pm based on value
+    else:
+        if hour < 7:  # 1-6 without am/pm → assume pm
+            hour += 12
+
+    hour = min(hour, 23)
+    minute = min(minute, 59)
+    return hour, minute
+
+def _parse_date(date_str: str):
+    """Parse date string into a date object. Returns today if parsing fails."""
+    now = datetime.now()
+    if not date_str or date_str.lower() in ("today", ""):
+        return now.date()
+    if date_str.lower() == "tomorrow":
+        return (now + timedelta(days=1)).date()
+
+    days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    for i, day in enumerate(days):
+        if day in date_str.lower():
+            days_ahead = (i - now.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            return (now + timedelta(days=days_ahead)).date()
+
+    # Try explicit date formats
+    for fmt_str in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%B %d", "%b %d"):
+        try:
+            parsed = datetime.strptime(date_str.strip(), fmt_str)
+            if parsed.year == 1900:
+                parsed = parsed.replace(year=now.year)
+            return parsed.date()
+        except ValueError:
+            continue
+
+    return now.date()
 
 def create_event(title: str, date_str: str = "", time_str: str = "", duration_mins: int = 60) -> str:
-    now = datetime.now()
+    """
+    Create a calendar event.
+    Handles cases where time is embedded in date_str (e.g. 'tomorrow at 3pm').
+    """
+    # Extract time from date_str if time_str is empty
+    if not time_str and date_str:
+        # Pattern: "tomorrow at 3pm", "today at 15:00", "friday at 9:30am"
+        time_in_date = re.search(
+            r'\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)',
+            date_str, re.IGNORECASE
+        )
+        if time_in_date:
+            time_str = time_in_date.group(1).strip()
+            date_str = date_str[:time_in_date.start()].strip()
 
-    # Parse date
-    if not date_str or date_str.lower() == "today":
-        event_date = now.date()
-    elif date_str.lower() == "tomorrow":
-        event_date = (now + timedelta(days=1)).date()
-    else:
-        days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
-        matched = False
-        for i, day in enumerate(days):
-            if day in date_str.lower():
-                days_ahead = (i - now.weekday()) % 7
-                if days_ahead == 0:
-                    days_ahead = 7
-                event_date = (now + timedelta(days=days_ahead)).date()
-                matched = True
-                break
-        if not matched:
-            try:
-                event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            except:
-                event_date = now.date()
+    event_date  = _parse_date(date_str)
+    event_hour, event_min = _parse_time(time_str)
 
-    # Parse time
-    if not time_str:
-        event_hour, event_min = 9, 0
-    else:
-        t = time_str.lower().strip()
-        try:
-            if "pm" in t:
-                t = t.replace("pm", "").strip()
-                parts = t.split(":")
-                event_hour = int(parts[0]) + 12
-                if event_hour == 24: event_hour = 12
-                event_min = int(parts[1]) if len(parts) > 1 else 0
-            elif "am" in t:
-                t = t.replace("am", "").strip()
-                parts = t.split(":")
-                event_hour = int(parts[0])
-                if event_hour == 12: event_hour = 0
-                event_min = int(parts[1]) if len(parts) > 1 else 0
-            else:
-                parts = t.split(":")
-                event_hour = int(parts[0])
-                event_min = int(parts[1]) if len(parts) > 1 else 0
-        except:
-            event_hour, event_min = 9, 0
-
-    start_dt = datetime(event_date.year, event_date.month, event_date.day, event_hour, event_min)
+    start_dt = datetime(event_date.year, event_date.month, event_date.day,
+                        event_hour, event_min)
     end_dt   = start_dt + timedelta(minutes=duration_mins)
 
     script = f'''
@@ -217,9 +248,9 @@ def create_event(title: str, date_str: str = "", time_str: str = "", duration_mi
     return "done"
     '''
     result = run_applescript(script)
-    if "done" in result or result == "":
-        return f"Event '{title}' created on {event_date.strftime('%A %d %B')} at {start_dt.strftime('%I:%M %p')}, Boss."
-    return f"Couldn't create event, Boss."
+    time_display = start_dt.strftime('%I:%M %p').lstrip('0')
+    date_display = event_date.strftime('%A %d %B')
+    return f"Event '{title}' created on {date_display} at {time_display}, Boss."
 
 def delete_event(title: str) -> str:
     script = f'''
@@ -299,4 +330,7 @@ if __name__ == "__main__":
     print(get_tomorrows_events())
     print(get_next_event())
     print(get_todays_reminders())
-    print(create_event("Test meeting", "tomorrow", "3pm", 60))
+    # Test time parsing
+    print(create_event("Team meeting", "tomorrow at 3pm", "", 60))
+    print(create_event("Standup", "today", "9:30am", 30))
+    print(create_event("Dinner", "friday", "7pm", 90))

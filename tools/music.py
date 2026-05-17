@@ -2,15 +2,11 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import subprocess
-import threading
 import time
-import random
+import config
 
 def run_applescript(script):
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True, text=True
-    )
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
     return result.stdout.strip()
 
 # ── Current state ──────────────────────────────────────────────────────────────
@@ -37,7 +33,8 @@ def play_song(song_name: str) -> str:
     result = run_applescript(script)
     if result == "not found" or result == "":
         query = song_name.replace(" ", "+")
-        subprocess.Popen(["open", f"https://music.apple.com/search?term={query}"])
+        subprocess.Popen(["open", "-a", config.DEFAULT_BROWSER,
+                          f"https://music.apple.com/search?term={query}"])
         return f"Not in your library, Boss. Opened Apple Music search for {song_name}."
     return f"Now playing {result}, Boss."
 
@@ -74,7 +71,8 @@ def play_artist(artist_name: str) -> str:
     result = run_applescript(script)
     if result == "not found":
         query = artist_name.replace(" ", "+")
-        subprocess.Popen(["open", f"https://music.apple.com/search?term={query}"])
+        subprocess.Popen(["open", "-a", config.DEFAULT_BROWSER,
+                          f"https://music.apple.com/search?term={query}"])
         return f"No tracks by {artist_name} in library, Boss. Opened Apple Music search."
     return f"Playing {artist_name}, Boss."
 
@@ -164,7 +162,6 @@ MUSIC_DIRS = [
 MUSIC_EXTENSIONS = {".mp3", ".m4a", ".flac", ".wav", ".aac", ".ogg"}
 
 def find_local_track(name: str) -> str | None:
-    """Search local folders for a music file matching name."""
     name_lower = name.lower()
     for folder in MUSIC_DIRS:
         if not os.path.exists(folder):
@@ -177,22 +174,18 @@ def find_local_track(name: str) -> str | None:
     return None
 
 def play_local_file(name: str) -> str:
-    """Find and play a local music file."""
     path = find_local_track(name)
     if path:
         subprocess.Popen(["open", path])
         return f"Playing {os.path.basename(path)}, Boss."
-    # Fall back to Apple Music search
     return play_song(name)
 
 def list_local_music(folder: str = "~/Music") -> str:
     path = os.path.expanduser(folder)
     if not os.path.exists(path):
         return f"Folder {folder} not found, Boss."
-    files = []
-    for f in os.listdir(path):
-        if os.path.splitext(f)[1].lower() in MUSIC_EXTENSIONS:
-            files.append(f)
+    files = [f for f in os.listdir(path)
+             if os.path.splitext(f)[1].lower() in MUSIC_EXTENSIONS]
     if not files:
         return f"No music files found in {folder}, Boss."
     return "Local tracks: " + ", ".join(files[:10]) + ", Boss."
@@ -218,34 +211,31 @@ def play_radio(station: str = "lofi") -> str:
 
     station_key = station.lower().strip()
     url = RADIO_STATIONS.get(station_key)
-
     if not url:
-        # Try partial match
         for k, v in RADIO_STATIONS.items():
             if station_key in k or k in station_key:
                 url = v
                 station_key = k
                 break
-
     if not url:
         available = ", ".join(RADIO_STATIONS.keys())
         return f"Station '{station}' not found, Boss. Available: {available}."
 
-    try:
-        # Use ffplay if available, else open in browser
-        result = subprocess.run(["which", "ffplay"], capture_output=True)
-        if result.returncode == 0:
+    # Try ffplay first (best — no browser needed)
+    ffplay = subprocess.run(["which", "ffplay"], capture_output=True)
+    if ffplay.returncode == 0:
+        try:
             _radio_process = subprocess.Popen(
                 ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", url],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             return f"Playing {station_key} radio, Boss."
-        else:
-            subprocess.Popen(["open", url])
-            return f"Opening {station_key} radio in browser, Boss."
-    except Exception as e:
-        subprocess.Popen(["open", url])
-        return f"Opening {station_key} radio in browser, Boss."
+        except Exception:
+            pass
+
+    # Fallback: open in Brave (not system default)
+    subprocess.Popen(["open", "-a", config.DEFAULT_BROWSER, url])
+    return f"Playing {station_key} radio in {config.DEFAULT_BROWSER}, Boss."
 
 def stop_radio() -> str:
     global _radio_process
@@ -256,8 +246,7 @@ def stop_radio() -> str:
     return "No radio playing, Boss."
 
 def list_radio_stations() -> str:
-    stations = ", ".join(RADIO_STATIONS.keys())
-    return f"Available stations: {stations}, Boss."
+    return "Available stations: " + ", ".join(RADIO_STATIONS.keys()) + ", Boss."
 
 # ── Ambient sounds ─────────────────────────────────────────────────────────────
 
@@ -280,32 +269,30 @@ def play_ambient(sound: str = "rain") -> str:
 
     sound_key = sound.lower().strip()
     url = AMBIENT_STREAMS.get(sound_key)
-
     if not url:
         for k, v in AMBIENT_STREAMS.items():
             if sound_key in k or k in sound_key:
                 url = v
                 sound_key = k
                 break
-
     if not url:
         available = ", ".join(AMBIENT_STREAMS.keys())
         return f"Sound '{sound}' not found, Boss. Available: {available}."
 
-    try:
-        result = subprocess.run(["which", "ffplay"], capture_output=True)
-        if result.returncode == 0:
+    ffplay = subprocess.run(["which", "ffplay"], capture_output=True)
+    if ffplay.returncode == 0:
+        try:
             _ambient_process = subprocess.Popen(
                 ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", url],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             return f"Playing {sound_key} sounds, Boss."
-        else:
-            subprocess.Popen(["open", url])
-            return f"Opening {sound_key} sounds in browser, Boss."
-    except Exception as e:
-        subprocess.Popen(["open", url])
-        return f"Opening {sound_key} in browser, Boss."
+        except Exception:
+            pass
+
+    # Fallback: open in Brave
+    subprocess.Popen(["open", "-a", config.DEFAULT_BROWSER, url])
+    return f"Playing {sound_key} sounds in {config.DEFAULT_BROWSER}, Boss."
 
 def stop_ambient() -> str:
     global _ambient_process

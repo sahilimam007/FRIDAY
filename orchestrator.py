@@ -38,7 +38,6 @@ from tools.mac_control import (
     next_track, previous_track, get_current_track, set_music_volume,
     calculate, convert_units, convert_currency,
     set_timer, start_stopwatch, stop_stopwatch, start_pomodoro,
-    focus_mode, vibe_mode, night_mode,
     take_note, read_notes,
     find_file, open_file_or_folder, create_folder, list_files, move_file, delete_file,
     git_status, run_terminal_command, open_vscode_project, kill_port, check_server,
@@ -51,8 +50,11 @@ from tools.productivity import (
     start_pomodoro as prod_start_pomodoro,
     stop_pomodoro, pomodoro_status,
     focus_mode as prod_focus_mode,
+    vibe_mode as prod_vibe_mode,
+    night_mode as prod_night_mode,
     meeting_mode, end_of_day_summary
 )
+
 from tools.alerts import (
     start_battery_monitor, stop_battery_monitor,
     check_weather_alert,
@@ -73,7 +75,7 @@ from tools.security import (
     generate_password, generate_pin, generate_passphrase,
     hash_text, check_password_strength
 )
-from tools.calendar import (
+from tools.calendar_tools import (
     get_todays_events, get_tomorrows_events, get_weeks_events,
     get_next_event, create_event, delete_event,
     get_todays_reminders, add_reminder, complete_reminder,
@@ -137,6 +139,7 @@ FINANCIAL_QUESTION_WORDS = [
     "should i invest", "is it safe to", "will it go up", "will it go down",
     "will it rise", "will it fall", "is it overvalued", "is it undervalued",
     "worth it", "should i put money", "should i hold",
+    "what's your take on", "going up", "going down",
 ]
 FINANCIAL_ASSET_WORDS = [
     "stock", "stocks", "share", "shares", "invest", "investment",
@@ -158,16 +161,13 @@ def is_financial_question(text: str) -> bool:
 
 # ── Battery output cleaner ─────────────────────────────────────────────────────
 def clean_battery_output(raw: str) -> str:
-    """Parse raw pmset battery output into a clean readable string."""
     try:
         percent_match = re.search(r'(\d+)%', raw)
         time_match    = re.search(r'(\d+:\d+) remaining', raw)
         charging      = "charging" in raw.lower()
         charged       = "charged" in raw.lower()
-
         percent = percent_match.group(1) if percent_match else "?"
         time_str = time_match.group(1) if time_match else None
-
         if charged:
             return f"Battery at {percent}%, fully charged, Boss."
         elif charging:
@@ -179,7 +179,52 @@ def clean_battery_output(raw: str) -> str:
                 return f"Battery at {percent}%, {time_str} remaining, Boss."
             return f"Battery at {percent}%, discharging, Boss."
     except Exception:
-        return raw  # fallback to raw if parsing fails
+        return raw
+
+# ── macOS Sequoia: show desktop + snap fixes ───────────────────────────────────
+def show_desktop_sequoia() -> str:
+    """Use Mission Control keyboard shortcut for macOS Sequoia."""
+    subprocess.run(["osascript", "-e",
+        'tell application "System Events" to key code 103 using {command down}'])
+    return "Showing desktop, Boss."
+
+def snap_left_sequoia() -> str:
+    """Snap window left using keyboard shortcut — works on macOS Sequoia with Rectangle/Magnet."""
+    subprocess.run(["osascript", "-e",
+        'tell application "System Events" to keystroke "left" using {control down, option down}'])
+    return "Snapped left, Boss. Install Rectangle app if this has no effect."
+
+def snap_right_sequoia() -> str:
+    subprocess.run(["osascript", "-e",
+        'tell application "System Events" to keystroke "right" using {control down, option down}'])
+    return "Snapped right, Boss. Install Rectangle app if this has no effect."
+
+def vibe_mode_fixed() -> str:
+    subprocess.run(["osascript", "-e", "set volume output volume 60"])
+    subprocess.run(["osascript", "-e", 'tell application "Music" to activate'])
+    subprocess.run(["osascript", "-e", 'tell application "Music" to play'])
+    return "Vibe mode on. Music playing, volume at 60, Boss."
+
+def night_mode_fixed() -> str:
+    subprocess.run(["osascript", "-e", "set volume output volume 20"])
+    subprocess.run(["osascript", "-e",
+        'tell application "System Events" to key code 145'])
+    subprocess.run(["osascript", "-e",
+        'tell application "System Events" to key code 145'])
+    subprocess.run(["osascript", "-e",
+        'tell application "System Events" to key code 145'])
+    return "Night mode on, Boss. Volume down, screen dimmed."
+
+def open_incognito_fixed(url: str = "") -> str:
+    """Open Brave in private/incognito mode."""
+    from config import DEFAULT_BROWSER
+    if url:
+        if not url.startswith("http"):
+            url = "https://" + url
+        subprocess.Popen(["open", "-na", DEFAULT_BROWSER, "--args", "--incognito", url])
+    else:
+        subprocess.Popen(["open", "-na", DEFAULT_BROWSER, "--args", "--incognito"])
+    return "Private browsing window opened in Brave, Boss."
 
 # ── Tool list ──────────────────────────────────────────────────────────────────
 TOOLS = """
@@ -207,14 +252,14 @@ do_not_disturb_on, do_not_disturb_off,
 get_clipboard, set_clipboard(text), paste_clipboard, type_text(text),
 take_screenshot, lock_screen, sleep_mac,
 calculate(expression), convert_units(expression), convert_currency(expression),
-set_timer(duration, label), start_stopwatch, stop_stopwatch,
+set_timer(duration|label), start_stopwatch, stop_stopwatch,
 start_pomodoro, stop_pomodoro, pomodoro_status,
 focus_mode, vibe_mode, night_mode, meeting_mode, end_of_day_summary,
 take_note(text), read_notes,
 find_file(name), open_file_or_folder(name), create_folder(name),
 list_files(folder), move_file(filename|destination), delete_file(name),
 git_status, git_commit(message), git_log, run_command(command),
-open_vscode(project), kill_port(port), check_server(port),
+open_vscode(folder_name), kill_port(port), check_server(port),
 count_lines_of_code, get_project_structure,
 open_whatsapp_chat(contact),
 summarise_clipboard, fix_grammar_clipboard, explain_code_clipboard,
@@ -242,56 +287,38 @@ set_reminder(duration|label), list_reminders, cancel_reminders,
 remember(fact), recall(query), clear_history, chat
 """
 
-# ── SPEAK_DIRECTLY — results spoken as-is, never re-processed by Ollama ───────
+# ── SPEAK_DIRECTLY ─────────────────────────────────────────────────────────────
 SPEAK_DIRECTLY = {
-    # Search & News
-    "search",
-    "get_news",
-
-    # Info lookups
+    "vibe_mode", "night_mode", "meeting_mode", "focus_mode",
+    "search", "get_news",
     "get_joke", "get_motivation", "define_word", "wikipedia_summary",
     "get_synonyms", "get_antonyms",
     "get_movie_info", "get_recipe", "get_random_recipe",
     "get_flight_status", "track_package",
-
-    # System
     "get_battery", "get_system_info", "get_ip", "ping_host",
     "list_files", "list_running_apps", "get_clipboard", "read_notes",
     "find_file", "get_volume",
-
-    # Developer
     "git_status", "run_command", "check_server",
     "count_lines_of_code", "get_project_structure",
-
-    # Math & conversion
     "calculate", "convert_units", "convert_currency",
-
-    # Stocks & sports
     "get_stock_price", "get_weather",
     "get_sports_score", "get_ipl_score",
     "get_cricket_score", "get_football_score",
     "get_f1_next_race", "get_f1_standings",
-
-    # Calendar & reminders
     "get_todays_events", "get_tomorrows_events", "get_weeks_events",
     "get_next_event", "get_todays_reminders", "list_reminders",
     "list_repeating_alerts", "alert_status", "pomodoro_status",
-
-    # Music state
     "get_current_track", "list_playlists", "list_radio_stations",
     "list_bluetooth_devices",
-
-    # Clipboard AI tools — fix_grammar runs Ollama internally, speak directly
-    # summarise_clipboard and explain_code_clipboard use SUMMARISE:/EXPLAIN_CODE: prefix
-    # so they must go through handle_ai_tool — do NOT add them here
-    "fix_grammar_clipboard", "translate_text", "word_count_clipboard",
-
-    # Security
+    "fix_grammar_clipboard", "translate_text",
     "generate_password", "generate_pin", "generate_passphrase",
     "check_password_strength", "hash_text",
-
-    # Memory
     "recall",
+    # Bug fixes — these were hallucinating through Ollama
+    "create_folder",
+    "check_weather_alert",
+    "end_of_day_summary",
+    "cancel_reminders",
 }
 
 # ── Intent classifier ──────────────────────────────────────────────────────────
@@ -310,14 +337,21 @@ Available tools:
 
 Rules:
 - If no tool fits, use "chat"
-- For translate_text: if user says "translate my clipboard" or "translate this", param = "|language" (empty text, just the language). Otherwise param = "text to translate|language"
-- For create_event: param = "title|date|time"
+- For open_youtube: ALWAYS use open_youtube if user wants to watch or play something on YouTube. param = the search query. Never use open_app for YouTube.
+- For open_vscode: param = the exact project folder name the user mentioned (e.g. "friday", "jarvis"). Never use "project" as param.
+- For vibe_mode: ONLY use when user says "vibe mode". Do NOT confuse with focus_mode or night_mode.
+- For night_mode: ONLY use when user says "night mode". Do NOT confuse with vibe_mode.
+- For meeting_mode: ONLY use when user says "meeting mode". Do NOT confuse with focus_mode.
+- For cancel_reminders: use when user says "cancel reminders" or "clear reminders". Do NOT use list_reminders.
+- For ping_host: use when user says "ping" followed by a hostname or IP. param = the hostname only. Never use chat for ping.
+- For translate_text: param = "text to translate|language"
+- For create_event: param = "title|date|time" — always include all three parts. Parse time carefully from user input (e.g. "3pm" = "3pm", "15:00" = "3pm").
 - For set_reminder: param = "duration|label"
 - For set_repeating_alert: param = "label|interval_mins"
 - For move_file: param = "filename|destination"
 - For get_stock_price: param must be ticker symbol only (e.g. AAPL, TSLA, RELIANCE.NS)
-- For wikipedia_summary: param must be the topic only (e.g. Nikola Tesla) — no prefix words
-- For get_news: param must be ONE word only: world, tech, india, science, business, or sports
+- For wikipedia_summary: param must be the topic only (e.g. Nikola Tesla)
+- For get_news: param must be ONE word: world, tech, india, science, business, or sports
 - Questions asking opinions about stocks/crypto = financial_deflect
 - Return ONLY valid JSON, nothing else
 
@@ -343,7 +377,6 @@ def execute_tool(tool: str, param: str) -> str | None:
     t = tool.lower().strip()
     p = param.strip() if param else ""
 
-    # Clean common classifier prefixes from params
     def clean_param(val, *prefixes):
         for prefix in prefixes:
             val = re.sub(rf'(?i){re.escape(prefix)}\s*=\s*', '', val).strip()
@@ -357,7 +390,6 @@ def execute_tool(tool: str, param: str) -> str | None:
     # Music
     if t == "play_song":
         if not p:
-            # Return directly — no param means we need to ask
             return "SPEAK_DIRECT:What would you like me to play, Boss?"
         return play_song(p)
     if t == "play_playlist":           return play_playlist(p)
@@ -377,7 +409,7 @@ def execute_tool(tool: str, param: str) -> str | None:
     if t == "pause_music":             return pause_music()
     if t == "resume_music":            return resume_music()
     if t == "next_track":              return next_track()
-    if t == "play_next_track":         return next_track()   # alias
+    if t == "play_next_track":         return next_track()
     if t == "previous_track":          return previous_track()
     if t == "get_current_track":       return get_current_track()
     if t == "set_music_volume":        return set_music_volume(int(p) if p.isdigit() else 50)
@@ -397,12 +429,12 @@ def execute_tool(tool: str, param: str) -> str | None:
     if t == "list_running_apps":       return list_running_apps()
     if t == "minimize_window":         return minimize_window()
     if t == "hide_app":                return hide_app()
-    if t == "show_desktop":            return show_desktop()
+    if t == "show_desktop":            return show_desktop_sequoia()   # FIX #6
     if t == "empty_trash":             return empty_trash()
     if t == "restart_mac":             return restart_mac()
     if t == "shutdown_mac":            return shutdown_mac()
-    if t == "snap_left":               return snap_left()
-    if t == "snap_right":              return snap_right()
+    if t == "snap_left":               return snap_left_sequoia()      # FIX #7
+    if t == "snap_right":              return snap_right_sequoia()     # FIX #7
     if t == "fullscreen":              return fullscreen()
     if t == "close_tab":               return close_tab()
     if t == "new_tab":                 return new_tab()
@@ -428,7 +460,7 @@ def execute_tool(tool: str, param: str) -> str | None:
     if t == "list_bluetooth_devices":  return list_bluetooth_devices()
     if t == "vpn_connect":             return vpn_connect(p)
     if t == "vpn_disconnect":          return vpn_disconnect(p)
-    if t == "open_incognito":          return open_incognito(p)
+    if t == "open_incognito":          return open_incognito_fixed(p)  # FIX #4
     if t == "wifi_on":                 return wifi_on()
     if t == "wifi_off":                return wifi_off()
     if t == "bluetooth_on":            return bluetooth_on()
@@ -444,7 +476,7 @@ def execute_tool(tool: str, param: str) -> str | None:
         return clean_battery_output(raw)
     if t == "get_system_info":         return get_system_info()
     if t == "get_ip":                  return get_ip()
-    if t == "ping_host":               return ping_host(p)
+    if t == "ping_host":               return ping_host(p)             # FIX #2
     if t == "take_screenshot":         return take_screenshot()
     if t == "lock_screen":             return lock_screen()
     if t == "sleep_mac":               return sleep_mac()
@@ -478,21 +510,21 @@ def execute_tool(tool: str, param: str) -> str | None:
     if t == "start_stopwatch":         return start_stopwatch()
     if t == "stop_stopwatch":          return stop_stopwatch()
 
-    # Productivity
+    # Productivity — FIX #11, #12, #13
     if t == "start_pomodoro":          return prod_start_pomodoro()
     if t == "stop_pomodoro":           return stop_pomodoro()
     if t == "pomodoro_status":         return pomodoro_status()
     if t == "focus_mode":              return prod_focus_mode()
-    if t == "vibe_mode":               return vibe_mode()
-    if t == "night_mode":              return night_mode()
-    if t == "meeting_mode":            return meeting_mode()
+    if t == "vibe_mode":               return prod_vibe_mode()
+    if t == "night_mode":              return prod_night_mode()     # FIX #12
+    if t == "meeting_mode":            return meeting_mode()           # FIX #11
     if t == "end_of_day_summary":      return end_of_day_summary()
 
     # Notes
     if t == "take_note":               return take_note(p)
     if t == "read_notes":              return read_notes()
 
-    # Files
+    # Files — FIX #1 (create_folder in SPEAK_DIRECTLY)
     if t == "find_file":               return find_file(p)
     if t == "open_file_or_folder":     return open_file_or_folder(p)
     if t == "create_folder":           return create_folder(p)
@@ -502,18 +534,22 @@ def execute_tool(tool: str, param: str) -> str | None:
         return move_file(parts[0].strip(), parts[1].strip() if len(parts) > 1 else "Desktop")
     if t == "delete_file":             return delete_file(p)
 
-    # Developer
+    # Developer — FIX #16 (open_vscode uses p directly)
     if t == "git_status":              return dev_git_status()
     if t == "git_commit":              return git_add_commit_push(p)
     if t == "git_log":                 return git_log()
     if t == "run_command":             return run_command(p)
-    if t == "open_vscode":             return dev_open_vscode(p or "friday")
+    if t == "open_vscode":
+        # Strip bad classifier params like "project", "folder", "directory"
+        bad_params = {"project", "folder", "directory", "repo", "code", ""}
+        folder = p if p.lower() not in bad_params else "friday"
+        return dev_open_vscode(folder)                                 # FIX #16
     if t == "kill_port":               return dev_kill_port(p)
     if t == "check_server":            return dev_check_server(p)
     if t == "count_lines_of_code":     return count_lines_of_code()
     if t == "get_project_structure":   return get_project_structure()
 
-    # Calendar
+    # Calendar — FIX #8 (create_event time parsing)
     if t == "get_todays_events":       return get_todays_events()
     if t == "get_tomorrows_events":    return get_tomorrows_events()
     if t == "get_weeks_events":        return get_weeks_events()
@@ -522,8 +558,18 @@ def execute_tool(tool: str, param: str) -> str | None:
         parts = p.split("|")
         title = parts[0].strip() if parts else p
         date  = parts[1].strip() if len(parts) > 1 else "today"
-        time  = parts[2].strip() if len(parts) > 2 else "9am"
-        return create_event(title, date, time)
+        # FIX: carefully parse time — preserve what user said
+        time_raw = parts[2].strip() if len(parts) > 2 else ""
+        # If date part contains time info, split it out
+        if not time_raw and len(parts) > 1:
+            date_part = parts[1].strip()
+            # Match patterns like "tomorrow at 3pm", "today at 15:00"
+            time_match = re.search(r'at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)', date_part, re.IGNORECASE)
+            if time_match:
+                time_raw = time_match.group(1).strip()
+                date = date_part[:time_match.start()].strip()
+        time_str = time_raw if time_raw else "9am"
+        return create_event(title, date, time_str)
     if t == "delete_event":            return delete_event(p)
     if t == "get_todays_reminders":    return get_todays_reminders()
     if t == "add_reminder":            return add_reminder(p)
@@ -542,14 +588,11 @@ def execute_tool(tool: str, param: str) -> str | None:
         parts = p.split("|")
         text = parts[0].strip()
         lang = parts[1].strip() if len(parts) > 1 else "hindi"
-        # Read clipboard if no real text content provided
         clipboard_trigger = (
             not text
             or text.lower() in ("text", "clipboard", "it", "this")
             or "clipboard" in text.lower()
-            or "translate my" in text.lower()
-            or "translate the" in text.lower()
-            or len(text.split()) > 5  # classifier leaked the raw sentence
+            or len(text.split()) > 5
         )
         if clipboard_trigger:
             import subprocess as _sp
@@ -578,7 +621,7 @@ def execute_tool(tool: str, param: str) -> str | None:
     # Alerts
     if t == "start_battery_monitor":   return start_battery_monitor()
     if t == "stop_battery_monitor":    return stop_battery_monitor()
-    if t == "check_weather_alert":     return check_weather_alert()
+    if t == "check_weather_alert":     return check_weather_alert()    # FIX #9 — SPEAK_DIRECTLY
     if t == "start_weather_monitor":   return start_weather_monitor()
     if t == "stop_weather_monitor":    return stop_weather_monitor()
     if t == "start_news_monitor":      return start_news_monitor()
@@ -599,7 +642,7 @@ def execute_tool(tool: str, param: str) -> str | None:
         label    = parts[1].strip() if len(parts) > 1 else "Reminder"
         return set_reminder(duration, label)
     if t == "list_reminders":          return list_reminders()
-    if t == "cancel_reminders":        return cancel_reminders()
+    if t == "cancel_reminders":        return cancel_reminders()       # FIX #14
     if t == "remember":
         p = clean_param(p, "fact")
         return remember(p)
@@ -683,7 +726,6 @@ def process(user_input: str) -> str:
     else:
         tool_result = execute_tool(tool, param)
         if tool_result:
-            # Direct speak override — bypass Ollama entirely
             if tool_result.startswith("SPEAK_DIRECT:"):
                 result = tool_result.replace("SPEAK_DIRECT:", "")
             else:

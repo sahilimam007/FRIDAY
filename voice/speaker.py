@@ -6,12 +6,13 @@ import random
 import time
 from config import SAY_VOICE
 
-_current_process = None
-_last_wake = None
+_current_process  = None
+_last_wake        = None
+_speaking         = False
 
-# Voice settings — adjust with "speak faster", "speak slower" etc.
-_speed = 175      # words per minute (default: 175, range: 100-300)
-_pitch = 50       # pitch (default: 50, range: 1-100)
+# Voice settings
+_speed = 175   # words per minute (100–300)
+_pitch = 50    # pitch (1–100)
 
 WAKE_RESPONSES = [
     "Yes Boss, how may I assist you?",
@@ -38,97 +39,75 @@ SHUTDOWN_RESPONSES = [
 ]
 
 def stop_speaking():
-    """Kill current speech immediately."""
-    global _current_process
+    """Kill current speech immediately — allows interruption mid-sentence."""
+    global _current_process, _speaking
+    _speaking = False
     if _current_process and _current_process.poll() is None:
         _current_process.kill()
+        _current_process.wait()   # wait for kill to complete, not for speech to finish
         _current_process = None
+    time.sleep(0.15)   # brief pause so audio device releases cleanly
+
+def is_speaking() -> bool:
+    """Returns True if Friday is currently speaking."""
+    return _speaking and _current_process is not None and _current_process.poll() is None
 
 def speak(text: str):
-    """Speak text out loud using macOS say command."""
-    global _current_process
+    """
+    Speak text using macOS say command.
+    Blocks until speech is done OR stop_speaking() is called.
+    stop_speaking() kills the process immediately — true interruption.
+    """
+    global _current_process, _speaking
     stop_speaking()
-    # [[slnc 1000]] adds 1 second silence at end to prevent cutoff
-    # [[pbas N]] sets pitch, [[rate N]] sets speed inline
     ssml = f"[[pbas {_pitch}]][[rate {_speed}]]{text.strip()} [[slnc 1000]]"
-    _current_process = subprocess.Popen(
-        ["say", "-v", SAY_VOICE, ssml]
-    )
-    _current_process.wait()
-    time.sleep(0.3)
+    _speaking = True
+    _current_process = subprocess.Popen(["say", "-v", SAY_VOICE, ssml])
+    _current_process.wait()   # blocks — but kill() in stop_speaking() unblocks this
+    _speaking = False
 
 def set_speed(level: str) -> str:
-    """
-    Set voice speed. level can be:
-    - 'faster', 'fast', 'slower', 'slow', 'normal', 'default'
-    - A number string like '200'
-    """
     global _speed
     level = level.strip().lower()
-
     presets = {
-        "slowest":  120,
-        "slow":     145,
-        "normal":   175,
-        "default":  175,
-        "fast":     210,
-        "faster":   210,
-        "fastest":  260,
-        "very fast": 260,
-        "very slow": 120,
+        "slowest": 120, "slow": 145, "normal": 175, "default": 175,
+        "fast": 210, "faster": 210, "fastest": 260,
+        "very fast": 260, "very slow": 120,
     }
-
     if level in presets:
         _speed = presets[level]
     else:
         try:
-            val = int(level)
-            _speed = max(100, min(300, val))
+            _speed = max(100, min(300, int(level)))
         except ValueError:
             return "I didn't catch that speed setting, Boss."
-
     return f"Voice speed set to {_speed} words per minute, Boss."
 
 def set_pitch(level: str) -> str:
-    """
-    Set voice pitch. level can be:
-    - 'higher', 'high', 'lower', 'low', 'normal', 'default'
-    - A number string like '60'
-    """
     global _pitch
     level = level.strip().lower()
-
     presets = {
-        "lowest":  20,
-        "low":     35,
-        "normal":  50,
-        "default": 50,
-        "high":    65,
-        "higher":  65,
-        "highest": 80,
-        "very high": 80,
-        "very low":  20,
+        "lowest": 20, "low": 35, "normal": 50, "default": 50,
+        "high": 65, "higher": 65, "highest": 80,
+        "very high": 80, "very low": 20,
     }
-
     if level in presets:
         _pitch = presets[level]
     else:
         try:
-            val = int(level)
-            _pitch = max(1, min(100, val))
+            _pitch = max(1, min(100, int(level)))
         except ValueError:
             return "I didn't catch that pitch setting, Boss."
-
     return f"Voice pitch set to {_pitch}, Boss."
 
 def get_voice_settings() -> str:
-    return f"Currently running at {_speed} words per minute, pitch {_pitch}, Boss."
+    return f"Currently at {_speed} words per minute, pitch {_pitch}, Boss."
 
 def wake_response():
-    """Friday greets Boss after being woken up."""
+    """Friday greets Boss after being woken — never repeats same phrase twice."""
     global _last_wake
     choices = [w for w in WAKE_RESPONSES if w != _last_wake]
-    phrase = random.choice(choices)
+    phrase  = random.choice(choices)
     _last_wake = phrase
     speak(phrase)
     return phrase
@@ -141,20 +120,8 @@ def shutdown_response():
 
 if __name__ == "__main__":
     speak("Friday online, Boss. All systems are operational and standing by.")
-    time.sleep(1)
-
-    print(set_speed("fast"))
-    speak("This is fast mode, Boss.")
-    time.sleep(1)
-
-    print(set_speed("slow"))
-    speak("This is slow mode, Boss.")
-    time.sleep(1)
-
-    print(set_speed("normal"))
-    print(set_pitch("high"))
-    speak("This is high pitch, Boss.")
-    time.sleep(1)
-
-    print(set_pitch("normal"))
-    speak("Back to normal. How does that sound, Boss?")
+    time.sleep(0.5)
+    speak("Testing interruption — this sentence should be cut short.")
+    time.sleep(1.0)
+    stop_speaking()
+    speak("Interrupted successfully, Boss.")

@@ -283,30 +283,36 @@ def friday_loop():
 
     while True:
         try:
-            set_orb_state("idle")
-            user_input, lang = listen()          # blocks until wake word / clap
+            # listener handles idle→listening→speaking→listening→processing internally
+            user_input, lang = listen()
 
             if not user_input.strip():
+                set_orb_state("idle")
                 continue
 
             print(f"[FRIDAY] Heard: {user_input}")
-            set_orb_state("processing")
 
+            # still processing (ollama thinking)
+            set_orb_state("processing")
             response = process(user_input)
             print(f"[FRIDAY] Response: {response}")
 
+            # speaking response
             set_orb_state("speaking")
             speak(response)
 
-            # follow-up
-            set_orb_state("listening")
+            # follow-up — listener_with_timeout handles orb states internally
+            set_orb_state("speaking")
             speak(random.choice(FOLLOWUPS))
+
             followup = listen_with_timeout(seconds=5)
             if followup and followup.strip():
                 set_orb_state("processing")
                 resp2 = process(followup)
                 set_orb_state("speaking")
                 speak(resp2)
+
+            set_orb_state("idle")
 
         except KeyboardInterrupt:
             shutdown_response()
@@ -315,7 +321,6 @@ def friday_loop():
         except Exception as e:
             print(f"[FRIDAY] Error: {e}")
             set_orb_state("idle")
-
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
